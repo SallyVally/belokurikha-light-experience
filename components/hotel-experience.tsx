@@ -21,13 +21,20 @@ import {
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ACESFilmicToneMapping,
+  AdditiveBlending,
+  BufferGeometry,
   Color,
+  DirectionalLight,
+  DoubleSide,
+  Float32BufferAttribute,
   Group,
+  MathUtils,
   Mesh,
   MeshStandardMaterial,
   PMREMGenerator,
   RectAreaLight,
   SRGBColorSpace,
+  ShaderMaterial,
   Shape,
   ShapeGeometry,
   Vector2,
@@ -100,6 +107,7 @@ const modeProfile: Record<
     practical: number;
     emissive: number;
     bloom: number;
+    glare: number;
     warmth: string;
     exteriorTint: string;
     ridgeTint: string;
@@ -113,6 +121,7 @@ const modeProfile: Record<
     practical: 0.2,
     emissive: 0.05,
     bloom: 0.34,
+    glare: 0.96,
     warmth: "#fff1db",
     exteriorTint: "#fffaf2",
     ridgeTint: "#315342",
@@ -125,6 +134,7 @@ const modeProfile: Record<
     practical: 1,
     emissive: 0.72,
     bloom: 0.76,
+    glare: 0.7,
     warmth: "#ffd6a4",
     exteriorTint: "#ffe0bd",
     ridgeTint: "#3b3d2d",
@@ -137,6 +147,7 @@ const modeProfile: Record<
     practical: 0.52,
     emissive: 0.42,
     bloom: 0.92,
+    glare: 0.08,
     warmth: "#dba47a",
     exteriorTint: "#766057",
     ridgeTint: "#1a211e",
@@ -149,11 +160,26 @@ const modeProfile: Record<
     practical: 0.22,
     emissive: 0.2,
     bloom: 0.58,
+    glare: 0,
     warmth: "#d98c56",
     exteriorTint: "#26344d",
     ridgeTint: "#0d1718",
   },
 };
+
+const modeCurtainPresets: Record<SceneMode, number> = {
+  morning: 100,
+  evening: 78,
+  cinema: 0,
+  night: 12,
+};
+
+function getWindowLight(curtain: number) {
+  const open = MathUtils.clamp(curtain / 100, 0, 1);
+  const sky = MathUtils.smoothstep(open, 0, 1);
+  const sun = Math.pow(MathUtils.smoothstep(open, 0.08, 1), 1.45);
+  return { open, sky, sun };
+}
 
 const practicalMaterialNames = new Set([
   "H_light",
@@ -192,21 +218,29 @@ function kelvinToColor(kelvin: number) {
 }
 
 function AreaLight({
+  height = 0.08,
   intensity,
   position,
+  target,
   temperature,
   width,
 }: {
+  height?: number;
   intensity: number;
   position: [number, number, number];
+  target?: [number, number, number];
   temperature: number;
   width: number;
 }) {
   const light = useRef<RectAreaLight>(null);
 
   useLayoutEffect(() => {
-    light.current?.lookAt(position[0], position[1] - 1, position[2]);
-  }, [position]);
+    light.current?.lookAt(
+      target?.[0] ?? position[0],
+      target?.[1] ?? position[1] - 1,
+      target?.[2] ?? position[2],
+    );
+  }, [position, target]);
 
   return (
     <rectAreaLight
@@ -215,7 +249,7 @@ function AreaLight({
       intensity={intensity}
       position={position}
       width={width}
-      height={0.08}
+      height={height}
     />
   );
 }
@@ -241,11 +275,11 @@ function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode 
   }, [gl, scene]);
 
   useEffect(() => {
-    const daylight = 0.36 + curtain / 156;
+    const { sky } = getWindowLight(curtain);
     // eslint-disable-next-line react-hooks/immutability
-    scene.environmentIntensity = profile.environment * daylight;
+    scene.environmentIntensity = profile.environment * (0.14 + sky * 0.28);
     // eslint-disable-next-line react-hooks/immutability
-    gl.toneMappingExposure = profile.exposure;
+    gl.toneMappingExposure = profile.exposure * (0.92 + sky * 0.08);
   }, [curtain, gl, profile, scene]);
 
   return null;
@@ -381,6 +415,222 @@ function ExteriorEnvironment({
   );
 }
 
+function createCurtainGeometry(side: "near" | "far", open: number, tier: AssetTier) {
+  const columns = tier === "premium" ? 34 : 18;
+  const rows = tier === "premium" ? 24 : 12;
+  const anchor = side === "near" ? -3.52 : -7.58;
+  const direction = side === "near" ? -1 : 1;
+  const span = MathUtils.lerp(2.06, tier === "premium" ? 0.5 : 0.56, open);
+  const folds = tier === "premium" ? 8 : 5;
+  const amplitude = MathUtils.lerp(0.055, 0.09, open);
+  const bottom = 1.015;
+  const top = 2.91;
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let row = 0; row <= rows; row += 1) {
+    const v = row / rows;
+    for (let column = 0; column <= columns; column += 1) {
+      const u = column / columns;
+      const fold = Math.sin(u * folds * Math.PI * 2 + (side === "far" ? Math.PI : 0));
+      const body = Math.sin(v * Math.PI);
+      const x = 2.455 + fold * amplitude * (0.82 + body * 0.18) + body * 0.012;
+      const y = MathUtils.lerp(bottom, top, v) + (1 - v) * fold * 0.009;
+      const z = anchor + direction * u * span;
+      positions.push(x, y, z);
+    }
+  }
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const a = row * (columns + 1) + column;
+      const b = a + 1;
+      const c = a + columns + 1;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function CurtainPanel({
+  curtain,
+  mode,
+  side,
+  tier,
+}: {
+  curtain: number;
+  mode: SceneMode;
+  side: "near" | "far";
+  tier: AssetTier;
+}) {
+  const { open } = getWindowLight(curtain);
+  const geometry = useMemo(
+    () => createCurtainGeometry(side, open, tier),
+    [open, side, tier],
+  );
+  const color = {
+    morning: "#725a4b",
+    evening: "#5b4034",
+    cinema: "#362925",
+    night: "#292526",
+  }[mode];
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <mesh
+      castShadow={tier === "premium"}
+      geometry={geometry}
+      receiveShadow={tier === "premium"}
+    >
+      <meshStandardMaterial
+        color={color}
+        envMapIntensity={0.16}
+        metalness={0}
+        roughness={0.92}
+        side={DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+function CurtainSystem({
+  curtain,
+  mode,
+  tier,
+}: {
+  curtain: number;
+  mode: SceneMode;
+  tier: AssetTier;
+}) {
+  return (
+    <group>
+      <mesh
+        castShadow={tier === "premium"}
+        position={[2.49, 2.945, -5.55]}
+        rotation={[Math.PI / 2, 0, 0]}
+      >
+        <cylinderGeometry args={[0.026, 0.026, 4.5, tier === "premium" ? 18 : 10]} />
+        <meshStandardMaterial color="#3d3029" metalness={0.72} roughness={0.28} />
+      </mesh>
+      <mesh position={[2.49, 2.945, -3.28]}>
+        <sphereGeometry args={[0.055, 12, 8]} />
+        <meshStandardMaterial color="#3d3029" metalness={0.72} roughness={0.28} />
+      </mesh>
+      <mesh position={[2.49, 2.945, -7.82]}>
+        <sphereGeometry args={[0.055, 12, 8]} />
+        <meshStandardMaterial color="#3d3029" metalness={0.72} roughness={0.28} />
+      </mesh>
+      <CurtainPanel curtain={curtain} mode={mode} side="near" tier={tier} />
+      <CurtainPanel curtain={curtain} mode={mode} side="far" tier={tier} />
+    </group>
+  );
+}
+
+const glareVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+function makeGlareMaterial(kind: "floor" | "window") {
+  const fragmentShader = kind === "floor"
+    ? `
+      varying vec2 vUv;
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      void main() {
+        float edgeX = smoothstep(0.0, 0.16, vUv.x) * smoothstep(0.0, 0.16, 1.0 - vUv.x);
+        float edgeY = smoothstep(0.0, 0.28, vUv.y) * smoothstep(0.0, 0.28, 1.0 - vUv.y);
+        float streak = 0.76 + 0.24 * pow(max(sin((vUv.y * 3.2 + vUv.x * 0.55) * 3.14159), 0.0), 5.0);
+        gl_FragColor = vec4(uColor, edgeX * edgeY * streak * uOpacity);
+      }
+    `
+    : `
+      varying vec2 vUv;
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      void main() {
+        vec2 p = vUv * 2.0 - 1.0;
+        p.x *= 0.82;
+        float halo = pow(max(1.0 - length(p), 0.0), 2.4);
+        gl_FragColor = vec4(uColor, halo * uOpacity);
+      }
+    `;
+
+  return new ShaderMaterial({
+    blending: AdditiveBlending,
+    depthTest: true,
+    depthWrite: false,
+    fragmentShader,
+    polygonOffset: kind === "floor",
+    polygonOffsetFactor: -2,
+    side: DoubleSide,
+    toneMapped: false,
+    transparent: true,
+    uniforms: {
+      uColor: { value: new Color("#ffd6a5") },
+      uOpacity: { value: 0 },
+    },
+    vertexShader: glareVertexShader,
+  });
+}
+
+function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; tier: AssetTier }) {
+  const profile = modeProfile[mode];
+  const { sun } = getWindowLight(curtain);
+  const floorMaterial = useMemo(() => makeGlareMaterial("floor"), []);
+  const windowMaterial = useMemo(() => makeGlareMaterial("window"), []);
+
+  useEffect(() => {
+    // Shader uniforms are the live controls for the sunlight response.
+    // eslint-disable-next-line react-hooks/immutability
+    floorMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.42;
+    floorMaterial.uniforms.uColor.value.set(profile.warmth);
+    // eslint-disable-next-line react-hooks/immutability
+    windowMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.34;
+    windowMaterial.uniforms.uColor.value.set(profile.warmth);
+  }, [floorMaterial, profile, sun, windowMaterial]);
+
+  useEffect(
+    () => () => {
+      floorMaterial.dispose();
+      windowMaterial.dispose();
+    },
+    [floorMaterial, windowMaterial],
+  );
+
+  return (
+    <group>
+      <mesh
+        material={floorMaterial}
+        position={[5.15, 1.018, -5.55]}
+        rotation={[-Math.PI / 2, 0, -0.08]}
+      >
+        <planeGeometry args={[5.1, 1.55]} />
+      </mesh>
+      {tier === "premium" ? (
+        <mesh
+          material={windowMaterial}
+          position={[2.26, 2.18, -4.62]}
+          rotation={[0, Math.PI / 2, 0]}
+        >
+          <planeGeometry args={[1.35, 1.35]} />
+        </mesh>
+      ) : null}
+    </group>
+  );
+}
+
 function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const { gl } = useThree();
   const profile = modeProfile[mode];
@@ -417,8 +667,8 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
         }
         if (name.includes("ceiling_plaster")) {
           next.color.set("#d8c5ac");
-          next.emissive = new Color("#2b2019");
-          next.emissiveIntensity = 0.14;
+          next.emissive = new Color("#17110e");
+          next.emissiveIntensity = 0.025;
           next.roughness = 0.86;
         }
         return next;
@@ -477,6 +727,75 @@ function CinematicCamera({ mode, parallax }: { mode: SceneMode; parallax: boolea
   return null;
 }
 
+function ExteriorLightRig({
+  curtain,
+  mode,
+  tier,
+}: {
+  curtain: number;
+  mode: SceneMode;
+  tier: AssetTier;
+}) {
+  const profile = modeProfile[mode];
+  const sunLight = useRef<DirectionalLight>(null);
+  const { sky, sun } = getWindowLight(curtain);
+
+  useLayoutEffect(() => {
+    if (!sunLight.current) return;
+    sunLight.current.target.position.set(6.8, 1.08, -6.15);
+    sunLight.current.target.updateMatrixWorld();
+  }, []);
+
+  return (
+    <>
+      <hemisphereLight
+        args={[
+          mode === "morning" ? "#dcefff" : "#b8c4d0",
+          "#211611",
+          0.055 + sky * 0.13,
+        ]}
+      />
+      <directionalLight
+        ref={sunLight}
+        castShadow={tier === "premium"}
+        color={mode === "morning" ? "#fff2d9" : "#ffc180"}
+        intensity={profile.key * sun * (mode === "morning" ? 1.2 : 1.05)}
+        position={[-5.8, 7.8, -2.65]}
+        shadow-bias={-0.00028}
+        shadow-camera-bottom={-6}
+        shadow-camera-far={28}
+        shadow-camera-left={-8}
+        shadow-camera-near={0.5}
+        shadow-camera-right={8}
+        shadow-camera-top={6}
+        shadow-mapSize-height={2048}
+        shadow-mapSize-width={2048}
+      />
+      <AreaLight
+        height={2.3}
+        intensity={profile.key * (0.04 + sky * 2.9)}
+        position={[2.08, 1.86, -5.55]}
+        target={[6.4, 1.45, -5.75]}
+        temperature={mode === "morning" ? 5600 : 4300}
+        width={4.2}
+      />
+      <AreaLight
+        intensity={2.2 * profile.practical}
+        position={[7.62, 2.86, -5.05]}
+        temperature={3842}
+        width={3.2}
+      />
+      <pointLight
+        color="#ffd4aa"
+        decay={2}
+        distance={4.5}
+        intensity={2.8 * profile.practical}
+        position={[7.9, 2.28, -8.35]}
+      />
+    </>
+  );
+}
+
 function Scene({
   curtain,
   mode,
@@ -488,58 +807,15 @@ function Scene({
   parallax: boolean;
   tier: AssetTier;
 }) {
-  const profile = modeProfile[mode];
-  const daylight = 0.38 + curtain / 160;
-
   return (
     <>
-      <color attach="background" args={[profile.background]} />
+      <color attach="background" args={[modeProfile[mode].background]} />
       <SceneEnvironment curtain={curtain} mode={mode} />
-      <hemisphereLight
-        args={[mode === "morning" ? "#eaf4ff" : "#b9c4ce", "#22150f", 0.5 * daylight]}
-      />
-      <directionalLight
-        castShadow={tier === "premium"}
-        color={mode === "morning" ? "#fff0d7" : "#ffc58f"}
-        intensity={profile.key * daylight}
-        position={[-5.5, 8.2, -1.5]}
-        shadow-bias={-0.00035}
-        shadow-camera-bottom={-8}
-        shadow-camera-far={32}
-        shadow-camera-left={-11}
-        shadow-camera-near={0.5}
-        shadow-camera-right={11}
-        shadow-camera-top={8}
-        shadow-mapSize-height={2048}
-        shadow-mapSize-width={2048}
-      />
-      <AreaLight
-        intensity={12 * profile.practical}
-        position={[11.685, 2.88, -8.972]}
-        temperature={3842}
-        width={7.84}
-      />
-      <AreaLight
-        intensity={9 * profile.practical}
-        position={[7.623, 2.863, -5.055]}
-        temperature={3842}
-        width={5.2}
-      />
-      <AreaLight
-        intensity={7 * profile.practical}
-        position={[12.8, 2.882, -11.165]}
-        temperature={3842}
-        width={4.16}
-      />
-      <pointLight
-        color="#fff0d7"
-        decay={2}
-        distance={10}
-        intensity={18 * profile.practical}
-        position={[16.73, 1.95, -7.42]}
-      />
+      <ExteriorLightRig curtain={curtain} mode={mode} tier={tier} />
       <ExteriorEnvironment curtain={curtain} mode={mode} tier={tier} />
       <Apartment mode={mode} tier={tier} />
+      <CurtainSystem curtain={curtain} mode={mode} tier={tier} />
+      <SunGlare curtain={curtain} mode={mode} tier={tier} />
       <CinematicCamera mode={mode} parallax={parallax} />
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
     </>
@@ -583,6 +859,10 @@ export function HotelExperience() {
   const [parallax, setParallax] = useState(true);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
   const activeMode = sceneModes.find((item) => item.id === mode) ?? sceneModes[1];
+  const activateMode = (nextMode: SceneMode) => {
+    setMode(nextMode);
+    setCurtain(modeCurtainPresets[nextMode]);
+  };
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -742,7 +1022,7 @@ export function HotelExperience() {
           <button type="button" className="icon-button" aria-label="Поиск">
             <Search aria-hidden="true" />
           </button>
-          <button type="button" className="demo-button" onClick={() => setMode("evening")}>
+          <button type="button" className="demo-button" onClick={() => activateMode("evening")}>
             Запустить демо <ArrowRight aria-hidden="true" />
           </button>
         </div>
@@ -851,7 +1131,7 @@ export function HotelExperience() {
               type="button"
               className={item.id === mode ? "is-active" : ""}
               aria-pressed={item.id === mode}
-              onClick={() => setMode(item.id)}
+              onClick={() => activateMode(item.id)}
             >
               <item.icon aria-hidden="true" />
               <span>
@@ -882,7 +1162,7 @@ export function HotelExperience() {
             className={item.id === mode ? "is-active" : ""}
             aria-label={item.label}
             aria-pressed={item.id === mode}
-            onClick={() => setMode(item.id)}
+            onClick={() => activateMode(item.id)}
           >
             <item.icon aria-hidden="true" />
             <span>{item.label}</span>
