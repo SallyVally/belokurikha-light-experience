@@ -1,0 +1,910 @@
+{
+  "source": {
+    "project": "CitySample",
+    "engine": "Unreal Engine 5.7.4",
+    "map": "/Game/Map/Big_City_LVL",
+    "generatedFrom": "C:/Users/Admin/Documents/AAELS/work/ue5_aaels_scene_audit.json"
+  },
+  "apartment": {
+    "actor": "root",
+    "componentCount": 143,
+    "staticMeshComponentCount": 117,
+    "dimensionsMeters": [
+      24.783614,
+      3.623268,
+      27.766917
+    ]
+  },
+  "camera": {
+    "label": "Camera",
+    "position": [
+      5.329332,
+      1.838943,
+      -7.790785
+    ],
+    "target": [
+      11.324226,
+      1.942773,
+      -8.015371
+    ],
+    "direction": [
+      0.999149,
+      0.017305,
+      -0.037431
+    ],
+    "focalLength": 28,
+    "aperture": 2.799999952316284,
+    "horizontalFov": 65.47045135498047,
+    "verticalFov": 48.897158,
+    "postProcessBlendWeight": 1,
+    "postProcess": {
+      "override_auto_exposure_method": true,
+      "auto_exposure_method": "<AutoExposureMethod.AEM_MANUAL: 2>",
+      "override_auto_exposure_bias": true,
+      "auto_exposure_bias": 4.360001087188721,
+      "override_auto_exposure_min_brightness": false,
+      "auto_exposure_min_brightness": -10,
+      "override_auto_exposure_max_brightness": false,
+      "auto_exposure_max_brightness": 20,
+      "override_white_temp": false,
+      "white_temp": 6500,
+      "override_white_tint": false,
+      "white_tint": 0,
+      "override_color_saturation": false,
+      "color_saturation": "<Struct 'Vector4' (0x00000215E70A9DD0) {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}>",
+      "override_color_contrast": false,
+      "color_contrast": "<Struct 'Vector4' (0x00000215E70A9DF0) {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}>",
+      "override_color_gamma": false,
+      "color_gamma": "<Struct 'Vector4' (0x00000215E70A9E10) {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}>",
+      "override_color_gain": false,
+      "color_gain": "<Struct 'Vector4' (0x00000215E70A9E30) {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}>",
+      "override_color_offset": false,
+      "color_offset": "<Struct 'Vector4' (0x00000215E70A9E50) {x: 0.000000, y: 0.000000, z: 0.000000, w: 0.000000}>",
+      "override_bloom_intensity": true,
+      "bloom_intensity": 8,
+      "override_bloom_threshold": false,
+      "bloom_threshold": -1,
+      "override_vignette_intensity": true,
+      "vignette_intensity": 0.492000013589859,
+      "override_dynamic_global_illumination_method": true,
+      "dynamic_global_illumination_method": "<DynamicGlobalIlluminationMethod.LUMEN: 1>",
+      "override_reflection_method": true,
+      "reflection_method": "<ReflectionMethod.LUMEN: 1>",
+      "override_indirect_lighting_intensity": true,
+      "indirect_lighting_intensity": 1,
+      "override_film_slope": false,
+      "film_slope": 0.8799999952316284,
+      "override_film_toe": false,
+      "film_toe": 0.550000011920929,
+      "override_film_shoulder": false,
+      "film_shoulder": 0.25999999046325684,
+      "override_film_black_clip": false,
+      "film_black_clip": 0,
+      "override_film_white_clip": false,
+      "film_white_clip": 0.03999999910593033
+    }
+  },
+  "lighting": {
+    "count": 30,
+    "rectCount": 25,
+    "spotCount": 4,
+    "lights": [
+      {
+        "label": "env_light",
+        "type": "sky",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 1,
+        "temperature": null,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": null,
+        "widthMeters": null,
+        "heightMeters": null,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight5",
+        "type": "rect",
+        "position": [
+          11.685363,
+          2.880513,
+          -8.972463
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 163.84,
+        "widthMeters": 7.84,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight7",
+        "type": "rect",
+        "position": [
+          13.722124,
+          1.016446,
+          -8.998626
+        ],
+        "direction": [
+          0.011299,
+          0.742315,
+          0.669956
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 157.671797,
+        "widthMeters": 3.6,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight14",
+        "type": "rect",
+        "position": [
+          14.848567,
+          1.016933,
+          -7.566366
+        ],
+        "direction": [
+          -0.011567,
+          0.727633,
+          -0.68587
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 163.84,
+        "widthMeters": 1.28,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight13",
+        "type": "rect",
+        "position": [
+          9.030992,
+          1.016446,
+          -8.919511
+        ],
+        "direction": [
+          0.011299,
+          0.742315,
+          0.669956
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 157.671797,
+        "widthMeters": 2.4,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight12",
+        "type": "rect",
+        "position": [
+          10.342577,
+          1.016933,
+          -7.490373
+        ],
+        "direction": [
+          -0.011567,
+          0.727633,
+          -0.68587
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 163.84,
+        "widthMeters": 5.04,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight3",
+        "type": "rect",
+        "position": [
+          12.351069,
+          1.017799,
+          -9.119171
+        ],
+        "direction": [
+          -0.015562,
+          0.702464,
+          -0.711549
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 69.765107,
+        "widthMeters": 0.8,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight11",
+        "type": "rect",
+        "position": [
+          17.932354,
+          2.931346,
+          -7.421596
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 12.594814,
+        "widthMeters": 7.36,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight22",
+        "type": "rect",
+        "position": [
+          12.800493,
+          2.881988,
+          -11.164684
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 4.16,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight21",
+        "type": "rect",
+        "position": [
+          12.802644,
+          1.016712,
+          -11.17015
+        ],
+        "direction": [
+          -0.707059,
+          0.707107,
+          -0.00819
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 4.16,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight19",
+        "type": "rect",
+        "position": [
+          3.09001,
+          2.871369,
+          -5.596922
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 6.32,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "Area_10",
+        "type": "rect",
+        "position": [
+          16.728755,
+          2.219889,
+          -7.419326
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 257.802001953125,
+        "temperature": 5181.60009765625,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 10,
+        "widthMeters": 1.96,
+        "heightMeters": 0.44,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight4",
+        "type": "rect",
+        "position": [
+          9.358665,
+          2.881988,
+          -11.170157
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 4.16,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "SpotLight",
+        "type": "spot",
+        "position": [
+          7.573918,
+          1.880448,
+          -6.618117
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 160,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 10,
+        "widthMeters": null,
+        "heightMeters": null,
+        "innerCone": 0,
+        "outerCone": 44
+      },
+      {
+        "label": "RectLight10",
+        "type": "rect",
+        "position": [
+          12.715682,
+          2.931346,
+          -2.564512
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 12.594814,
+        "widthMeters": 1.36,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight9",
+        "type": "rect",
+        "position": [
+          12.474134,
+          2.931346,
+          -6.828187
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 12.594814,
+        "widthMeters": 0.8,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight6",
+        "type": "rect",
+        "position": [
+          11.685152,
+          2.880513,
+          -7.519257
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 7.84,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight8",
+        "type": "rect",
+        "position": [
+          12.069348,
+          2.931346,
+          -4.672441
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 12.594814,
+        "widthMeters": 4.24,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight2",
+        "type": "rect",
+        "position": [
+          11.099335,
+          2.85463,
+          -9.110298
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 3.52,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight17",
+        "type": "rect",
+        "position": [
+          7.622705,
+          2.862842,
+          -5.055398
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 5.2,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight15",
+        "type": "rect",
+        "position": [
+          15.457386,
+          2.878069,
+          -8.299952
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 1.44,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "Area_9",
+        "type": "rect",
+        "position": [
+          16.728755,
+          2.525181,
+          -7.419326
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 257.802001953125,
+        "temperature": 5099.2001953125,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 10,
+        "widthMeters": 1.96,
+        "heightMeters": 0.44,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight",
+        "type": "rect",
+        "position": [
+          11.099321,
+          2.848659,
+          -13.085924
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 3.52,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "RectLight16",
+        "type": "rect",
+        "position": [
+          15.45291,
+          1.025676,
+          -7.791841
+        ],
+        "direction": [
+          -0.958216,
+          0.285921,
+          -0.008441
+        ],
+        "intensity": 160,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 0.4,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "SpotLight4",
+        "type": "spot",
+        "position": [
+          7.576549,
+          2.024068,
+          -4.72942
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "intensity": 160,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 10,
+        "widthMeters": null,
+        "heightMeters": null,
+        "innerCone": 0,
+        "outerCone": 44
+      },
+      {
+        "label": "Area_008",
+        "type": "rect",
+        "position": [
+          16.728755,
+          1.954496,
+          -7.419326
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 2010.6192626953125,
+        "temperature": 5428.7998046875,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 10,
+        "widthMeters": 1.96,
+        "heightMeters": 1,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "SpotLight3",
+        "type": "spot",
+        "position": [
+          7.567587,
+          1.877731,
+          -4.725084
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "intensity": 160,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 10,
+        "widthMeters": null,
+        "heightMeters": null,
+        "innerCone": 0,
+        "outerCone": 44
+      },
+      {
+        "label": "RectLight18",
+        "type": "rect",
+        "position": [
+          7.620318,
+          1.018857,
+          -5.055432
+        ],
+        "direction": [
+          -0.378146,
+          0.92573,
+          -0.005342
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 5.2,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      },
+      {
+        "label": "SpotLight2",
+        "type": "spot",
+        "position": [
+          7.587035,
+          2.024068,
+          -6.602484
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "intensity": 160,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 1.15335,
+        "widthMeters": null,
+        "heightMeters": null,
+        "innerCone": 0,
+        "outerCone": 44
+      },
+      {
+        "label": "RectLight20",
+        "type": "rect",
+        "position": [
+          12.802644,
+          1.016712,
+          -11.17015
+        ],
+        "direction": [
+          -0.707059,
+          0.707107,
+          -0.00819
+        ],
+        "intensity": 500,
+        "temperature": 3842.400146484375,
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        },
+        "rangeMeters": 63.122632,
+        "widthMeters": 4.16,
+        "heightMeters": 0.01,
+        "innerCone": null,
+        "outerCone": null
+      }
+    ]
+  },
+  "webStrategy": {
+    "dynamicShadowLights": 1,
+    "realtimeAccentLights": 3,
+    "bakeRemainingLights": true,
+    "cameraMovement": "limited-parallax"
+  }
+}
