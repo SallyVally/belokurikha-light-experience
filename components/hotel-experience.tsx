@@ -28,10 +28,14 @@ import {
   DoubleSide,
   Float32BufferAttribute,
   Group,
+  HemisphereLight,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PMREMGenerator,
+  Points as ThreePoints,
+  PointsMaterial,
   RectAreaLight,
   SRGBColorSpace,
   ShaderMaterial,
@@ -117,13 +121,13 @@ const modeProfile: Record<
 > = {
   morning: {
     background: "#777c7b",
-    environment: 0.92,
-    exposure: 1.18,
-    key: 2.8,
+    environment: 0.48,
+    exposure: 0.94,
+    key: 1.15,
     practical: 0.2,
     emissive: 0.05,
-    bloom: 0.34,
-    glare: 0.96,
+    bloom: 0.18,
+    glare: 0.28,
     warmth: "#fff1db",
     exteriorTint: "#fffaf2",
     ridgeTint: "#315342",
@@ -259,6 +263,7 @@ function AreaLight({
 function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode }) {
   const { gl, scene } = useThree();
   const profile = modeProfile[mode];
+  const animatedOpen = useRef(getWindowLight(curtain).open);
 
   useEffect(() => {
     RectAreaLightUniformsLib.init();
@@ -276,13 +281,21 @@ function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode 
     };
   }, [gl, scene]);
 
-  useEffect(() => {
-    const { sky } = getWindowLight(curtain);
+  // Three.js exposes live renderer and scene controls for per-frame animation.
+  // eslint-disable-next-line react-hooks/immutability
+  useFrame((_, delta) => {
+    animatedOpen.current = MathUtils.damp(
+      animatedOpen.current,
+      getWindowLight(curtain).open,
+      3.8,
+      delta,
+    );
+    const { sky } = getWindowLight(animatedOpen.current * 100);
     // eslint-disable-next-line react-hooks/immutability
     scene.environmentIntensity = profile.environment * (0.14 + sky * 0.28);
     // eslint-disable-next-line react-hooks/immutability
     gl.toneMappingExposure = profile.exposure * (0.92 + sky * 0.08);
-  }, [curtain, gl, profile, scene]);
+  });
 
   return null;
 }
@@ -385,13 +398,24 @@ function ExteriorEnvironment({
     next.needsUpdate = true;
     return next;
   }, [texture, tier]);
-  const landscapeColor = useMemo(
-    () =>
-      new Color(profile.exteriorTint).multiplyScalar(
-        0.18 + Math.pow(curtain / 100, 0.72) * 0.82,
-      ),
-    [curtain, profile.exteriorTint],
-  );
+  const landscapeMaterial = useRef<MeshBasicMaterial>(null);
+  const animatedOpen = useRef(getWindowLight(curtain).open);
+  const landscapeTint = useMemo(() => new Color(profile.exteriorTint), [profile.exteriorTint]);
+  const workingColor = useMemo(() => new Color(), []);
+
+  // The landscape material is intentionally animated by the render loop.
+  useFrame((_, delta) => {
+    animatedOpen.current = MathUtils.damp(
+      animatedOpen.current,
+      getWindowLight(curtain).open,
+      3.6,
+      delta,
+    );
+    if (!landscapeMaterial.current) return;
+    const brightness = 0.18 + Math.pow(animatedOpen.current, 0.72) * 0.82;
+    workingColor.copy(landscapeTint).multiplyScalar(brightness);
+    landscapeMaterial.current.color.copy(workingColor);
+  });
 
   useEffect(() => () => configuredTexture.dispose(), [configuredTexture]);
 
@@ -399,7 +423,12 @@ function ExteriorEnvironment({
     <group>
       <mesh position={[-8, 1.72, -10.95]} rotation={[0, Math.PI / 2, 0]}>
         <planeGeometry args={[34, 12.75]} />
-        <meshBasicMaterial color={landscapeColor} map={configuredTexture} toneMapped />
+        <meshBasicMaterial
+          ref={landscapeMaterial}
+          color={landscapeTint}
+          map={configuredTexture}
+          toneMapped
+        />
       </mesh>
       <LandscapeRidge
         color={profile.ridgeTint}
@@ -417,18 +446,23 @@ function ExteriorEnvironment({
   );
 }
 
-function createCurtainGeometry(side: "near" | "far", open: number, tier: AssetTier) {
-  const columns = tier === "premium" ? 34 : 18;
-  const rows = tier === "premium" ? 24 : 12;
-  const anchor = side === "near" ? -3.52 : -7.58;
+function getCurtainAnchor(side: "near" | "far") {
+  return side === "near" ? -3.52 : -7.58;
+}
+
+function createCurtainPositions(
+  side: "near" | "far",
+  open: number,
+  columns: number,
+  rows: number,
+  tier: AssetTier,
+) {
   const direction = side === "near" ? -1 : 1;
   const span = MathUtils.lerp(2.06, tier === "premium" ? 0.5 : 0.56, open);
   const folds = tier === "premium" ? 8 : 5;
   const amplitude = MathUtils.lerp(0.055, 0.09, open);
-  const bottom = 1.015;
-  const top = 2.91;
+  const height = 2.91 - 1.015;
   const positions: number[] = [];
-  const indices: number[] = [];
 
   for (let row = 0; row <= rows; row += 1) {
     const v = row / rows;
@@ -436,12 +470,22 @@ function createCurtainGeometry(side: "near" | "far", open: number, tier: AssetTi
       const u = column / columns;
       const fold = Math.sin(u * folds * Math.PI * 2 + (side === "far" ? Math.PI : 0));
       const body = Math.sin(v * Math.PI);
-      const x = 2.455 + fold * amplitude * (0.82 + body * 0.18) + body * 0.012;
-      const y = MathUtils.lerp(bottom, top, v) + (1 - v) * fold * 0.009;
-      const z = anchor + direction * u * span;
+      const x = fold * amplitude * (0.82 + body * 0.18) + body * 0.012;
+      const y = -height + height * v + (1 - v) * fold * 0.009;
+      const z = direction * u * span;
       positions.push(x, y, z);
     }
   }
+
+  return positions;
+}
+
+function createCurtainGeometry(side: "near" | "far", tier: AssetTier) {
+  const columns = tier === "premium" ? 34 : 18;
+  const rows = tier === "premium" ? 24 : 12;
+  const closedPositions = createCurtainPositions(side, 0, columns, rows, tier);
+  const openPositions = createCurtainPositions(side, 1, columns, rows, tier);
+  const indices: number[] = [];
 
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
@@ -454,7 +498,9 @@ function createCurtainGeometry(side: "near" | "far", open: number, tier: AssetTi
   }
 
   const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("position", new Float32BufferAttribute(closedPositions, 3));
+  geometry.morphAttributes.position = [new Float32BufferAttribute(openPositions, 3)];
+  geometry.morphTargetsRelative = false;
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
@@ -472,11 +518,10 @@ function CurtainPanel({
   side: "near" | "far";
   tier: AssetTier;
 }) {
-  const { open } = getWindowLight(curtain);
-  const geometry = useMemo(
-    () => createCurtainGeometry(side, open, tier),
-    [open, side, tier],
-  );
+  const initialOpen = getWindowLight(curtain).open;
+  const geometry = useMemo(() => createCurtainGeometry(side, tier), [side, tier]);
+  const mesh = useRef<Mesh>(null);
+  const motion = useRef({ value: initialOpen, velocity: 0, sway: 0 });
   const color = {
     morning: "#725a4b",
     evening: "#5b4034",
@@ -486,10 +531,38 @@ function CurtainPanel({
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
+  useLayoutEffect(() => {
+    mesh.current?.updateMorphTargets();
+    if (mesh.current?.morphTargetInfluences) {
+      mesh.current.morphTargetInfluences[0] = motion.current.value;
+    }
+  }, [geometry]);
+
+  useFrame(({ clock }, delta) => {
+    if (!mesh.current?.morphTargetInfluences) return;
+    const target = getWindowLight(curtain).open;
+    const dt = Math.min(delta, 0.035);
+    const stiffness = side === "near" ? 43 : 32;
+    const damping = side === "near" ? 8.8 : 7.4;
+    const state = motion.current;
+    state.velocity += (target - state.value) * stiffness * dt;
+    state.velocity *= Math.exp(-damping * dt);
+    state.value = MathUtils.clamp(state.value + state.velocity * dt, -0.025, 1.025);
+    state.sway = Math.max(state.sway, Math.min(0.042, Math.abs(state.velocity) * 0.013));
+    state.sway *= Math.exp(-2.45 * dt);
+
+    mesh.current.morphTargetInfluences[0] = state.value;
+    const phase = side === "near" ? 0 : 0.72;
+    mesh.current.rotation.x = Math.sin(clock.elapsedTime * 5.1 + phase) * state.sway;
+    mesh.current.rotation.z = Math.cos(clock.elapsedTime * 4.15 + phase) * state.sway * 0.28;
+  });
+
   return (
     <mesh
+      ref={mesh}
       castShadow={tier === "premium"}
       geometry={geometry}
+      position={[2.455, 2.91, getCurtainAnchor(side)]}
       receiveShadow={tier === "premium"}
     >
       <meshStandardMaterial
@@ -589,19 +662,38 @@ function makeGlareMaterial(kind: "floor" | "window") {
 
 function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; tier: AssetTier }) {
   const profile = modeProfile[mode];
-  const { sun } = getWindowLight(curtain);
   const floorMaterial = useMemo(() => makeGlareMaterial("floor"), []);
   const windowMaterial = useMemo(() => makeGlareMaterial("window"), []);
+  const floorPatch = useRef<Mesh>(null);
+  const windowGlow = useRef<Mesh>(null);
+  const animatedOpen = useRef(getWindowLight(curtain).open);
 
   useEffect(() => {
-    // Shader uniforms are the live controls for the sunlight response.
-    // eslint-disable-next-line react-hooks/immutability
-    floorMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.42;
     floorMaterial.uniforms.uColor.value.set(profile.warmth);
-    // eslint-disable-next-line react-hooks/immutability
-    windowMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.34;
     windowMaterial.uniforms.uColor.value.set(profile.warmth);
-  }, [floorMaterial, profile, sun, windowMaterial]);
+  }, [floorMaterial, profile.warmth, windowMaterial]);
+
+  // Shader uniforms are intentionally mutated by the render loop.
+  // eslint-disable-next-line react-hooks/immutability
+  useFrame((_, delta) => {
+    animatedOpen.current = MathUtils.damp(
+      animatedOpen.current,
+      getWindowLight(curtain).open,
+      3.55,
+      delta,
+    );
+    const { sky, sun } = getWindowLight(animatedOpen.current * 100);
+    // eslint-disable-next-line react-hooks/immutability
+    floorMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.2;
+    // eslint-disable-next-line react-hooks/immutability
+    windowMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.12;
+    if (floorPatch.current) {
+      floorPatch.current.scale.y = MathUtils.lerp(0.12, 1, sky);
+    }
+    if (windowGlow.current) {
+      windowGlow.current.scale.x = MathUtils.lerp(0.1, 1, sky);
+    }
+  });
 
   useEffect(
     () => () => {
@@ -614,6 +706,7 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
   return (
     <group>
       <mesh
+        ref={floorPatch}
         material={floorMaterial}
         position={[5.15, 1.018, -5.55]}
         rotation={[-Math.PI / 2, 0, -0.08]}
@@ -622,6 +715,7 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
       </mesh>
       {tier === "premium" ? (
         <mesh
+          ref={windowGlow}
           material={windowMaterial}
           position={[2.26, 2.18, -4.62]}
           rotation={[0, Math.PI / 2, 0]}
@@ -630,6 +724,77 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
         </mesh>
       ) : null}
     </group>
+  );
+}
+
+function createDustGeometry(tier: AssetTier) {
+  const count = tier === "premium" ? 78 : 24;
+  const positions = new Float32Array(count * 3);
+  let seed = 1847;
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  for (let index = 0; index < count; index += 1) {
+    const along = random();
+    const spread = 0.2 + along * 0.52;
+    positions[index * 3] = -1.7 + along * 3.5;
+    positions[index * 3 + 1] = (random() - 0.5) * 1.35;
+    positions[index * 3 + 2] = (random() - 0.5) * spread * 2;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; tier: AssetTier }) {
+  const profile = modeProfile[mode];
+  const geometry = useMemo(() => createDustGeometry(tier), [tier]);
+  const points = useRef<ThreePoints>(null);
+  const material = useRef<PointsMaterial>(null);
+  const animatedOpen = useRef(getWindowLight(curtain).open);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useEffect(() => {
+    material.current?.color.set(profile.warmth);
+  }, [profile.warmth]);
+
+  useFrame(({ clock }, delta) => {
+    animatedOpen.current = MathUtils.damp(
+      animatedOpen.current,
+      getWindowLight(curtain).open,
+      3.25,
+      delta,
+    );
+    const { sun } = getWindowLight(animatedOpen.current * 100);
+    if (material.current) {
+      material.current.opacity = sun * profile.glare * (tier === "premium" ? 0.38 : 0.2);
+    }
+    if (points.current) {
+      points.current.position.y = 1.96 + Math.sin(clock.elapsedTime * 0.48) * 0.025;
+      points.current.rotation.x = Math.sin(clock.elapsedTime * 0.21) * 0.012;
+      points.current.rotation.y = Math.cos(clock.elapsedTime * 0.17) * 0.009;
+    }
+  });
+
+  return (
+    <points ref={points} geometry={geometry} position={[4.25, 1.96, -5.55]}>
+      <pointsMaterial
+        ref={material}
+        blending={AdditiveBlending}
+        color={profile.warmth}
+        depthWrite={false}
+        opacity={0}
+        size={tier === "premium" ? 0.022 : 0.027}
+        sizeAttenuation
+        toneMapped={false}
+        transparent
+      />
+    </points>
   );
 }
 
@@ -742,28 +907,56 @@ function ExteriorLightRig({
 }) {
   const profile = modeProfile[mode];
   const sunLight = useRef<DirectionalLight>(null);
-  const { sky, sun } = getWindowLight(curtain);
+  const skyLight = useRef<HemisphereLight>(null);
+  const portalLight = useRef<RectAreaLight>(null);
+  const animatedOpen = useRef(getWindowLight(curtain).open);
+  const initialLight = getWindowLight(curtain);
 
   useLayoutEffect(() => {
-    if (!sunLight.current) return;
-    sunLight.current.target.position.set(6.8, 1.08, -6.15);
-    sunLight.current.target.updateMatrixWorld();
+    if (sunLight.current) {
+      sunLight.current.target.position.set(6.8, 1.08, -6.15);
+      sunLight.current.target.updateMatrixWorld();
+    }
+    portalLight.current?.lookAt(6.4, 1.45, -5.75);
   }, []);
+
+  useFrame((_, delta) => {
+    animatedOpen.current = MathUtils.damp(
+      animatedOpen.current,
+      getWindowLight(curtain).open,
+      3.7,
+      delta,
+    );
+    const { sky, sun } = getWindowLight(animatedOpen.current * 100);
+    if (skyLight.current) {
+      skyLight.current.intensity = 0.055 + sky * 0.13;
+    }
+    if (sunLight.current) {
+      sunLight.current.intensity =
+        profile.key * sun * (mode === "morning" ? 1.2 : 1.05);
+    }
+    if (portalLight.current) {
+      portalLight.current.intensity = profile.key * (0.04 + sky * 2.9);
+    }
+  });
 
   return (
     <>
       <hemisphereLight
+        ref={skyLight}
         args={[
           mode === "morning" ? "#dcefff" : "#b8c4d0",
           "#211611",
-          0.055 + sky * 0.13,
+          0.055 + initialLight.sky * 0.13,
         ]}
       />
       <directionalLight
         ref={sunLight}
         castShadow={tier === "premium"}
         color={mode === "morning" ? "#fff2d9" : "#ffc180"}
-        intensity={profile.key * sun * (mode === "morning" ? 1.2 : 1.05)}
+        intensity={
+          profile.key * initialLight.sun * (mode === "morning" ? 1.2 : 1.05)
+        }
         position={[-5.8, 7.8, -2.65]}
         shadow-bias={-0.00028}
         shadow-camera-bottom={-6}
@@ -775,12 +968,12 @@ function ExteriorLightRig({
         shadow-mapSize-height={2048}
         shadow-mapSize-width={2048}
       />
-      <AreaLight
+      <rectAreaLight
+        ref={portalLight}
+        color={kelvinToColor(mode === "morning" ? 5600 : 4300)}
         height={2.3}
-        intensity={profile.key * (0.04 + sky * 2.9)}
+        intensity={profile.key * (0.04 + initialLight.sky * 2.9)}
         position={[2.08, 1.86, -5.55]}
-        target={[6.4, 1.45, -5.75]}
-        temperature={mode === "morning" ? 5600 : 4300}
         width={4.2}
       />
       <AreaLight
@@ -820,6 +1013,7 @@ function Scene({
       <Apartment mode={mode} tier={tier} />
       <CurtainSystem curtain={curtain} mode={mode} tier={tier} />
       <SunGlare curtain={curtain} mode={mode} tier={tier} />
+      <DustMotes curtain={curtain} mode={mode} tier={tier} />
       <CinematicCamera mode={mode} parallax={parallax} />
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
     </>
