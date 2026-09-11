@@ -838,9 +838,17 @@ function LoadStatus() {
 }
 
 function chooseTier(): AssetTier {
-  const compact = window.matchMedia("(max-width: 820px), (pointer: coarse)").matches;
+  const width = window.innerWidth;
+  const narrow = window.matchMedia("(max-width: 900px)").matches;
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-  return compact || (memory !== undefined && memory <= 6) ? "mobile" : "premium";
+  const processors = navigator.hardwareConcurrency;
+  const constrainedHardware =
+    width < 1180 &&
+    ((memory !== undefined && memory <= 4) ||
+      (processors !== undefined && processors <= 4));
+  const compactTouchDevice = coarsePointer && width < 1100;
+  return narrow || compactTouchDevice || constrainedHardware ? "mobile" : "premium";
 }
 
 const roomStatus = [
