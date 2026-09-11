@@ -51,6 +51,8 @@ import { Slider } from "@/components/ui/slider";
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
 
+const SCENE_ASSET_REVISION = "2026-09-11-lighting-curtains";
+
 type ExperienceState = {
   mode: SceneMode;
   curtain: number;
@@ -373,8 +375,8 @@ function ExteriorEnvironment({
   const profile = modeProfile[mode];
   const texture = useTexture(
     tier === "premium"
-      ? "/environments/belokurikha-valley-2048.webp"
-      : "/environments/belokurikha-valley-1280.webp",
+      ? `/environments/belokurikha-valley-2048.webp?rev=${SCENE_ASSET_REVISION}`
+      : `/environments/belokurikha-valley-1280.webp?rev=${SCENE_ASSET_REVISION}`,
   );
   const configuredTexture = useMemo(() => {
     const next = texture.clone();
@@ -635,7 +637,9 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const { gl } = useThree();
   const profile = modeProfile[mode];
   const url =
-    tier === "premium" ? "/models/AAELS-premium-web.glb" : "/models/AAELS-mobile.glb";
+    tier === "premium"
+      ? `/models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`
+      : `/models/AAELS-mobile.glb?rev=${SCENE_ASSET_REVISION}`;
   const gltf = useGLTF(url);
   const model = useMemo(() => gltf.scene.clone(true) as Group, [gltf.scene]);
 
