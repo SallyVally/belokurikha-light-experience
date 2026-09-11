@@ -67,9 +67,12 @@ type WebMcpContext = {
   ) => void | Promise<void>;
 };
 
-const UE_CAMERA = {
-  position: [5.329332, 1.838943, -7.790785] as [number, number, number],
-  target: [11.324226, 1.942773, -8.015371] as [number, number, number],
+// The UE actor transform does not share the final GLB's baked Blender basis.
+// These anchors are measured against the exported room: camera clear of the
+// corridor wall, target on the bedroom window, bed held in the right foreground.
+const WEB_CAMERA = {
+  position: [7.35, 1.72, -3.75] as [number, number, number],
+  target: [2.55, 1.72, -6] as [number, number, number],
   verticalFov: 48.897158,
 };
 
@@ -154,20 +157,20 @@ const practicalMaterialNames = new Set([
 
 const sceneShots: Record<SceneMode, { position: Vector3; target: Vector3 }> = {
   morning: {
-    position: new Vector3(5.2, 1.9, -7.62),
-    target: new Vector3(11.36, 1.98, -8.08),
+    position: new Vector3(7.28, 1.78, -3.65),
+    target: new Vector3(2.45, 1.76, -5.92),
   },
   evening: {
-    position: new Vector3(...UE_CAMERA.position),
-    target: new Vector3(...UE_CAMERA.target),
+    position: new Vector3(...WEB_CAMERA.position),
+    target: new Vector3(...WEB_CAMERA.target),
   },
   cinema: {
-    position: new Vector3(5.42, 1.78, -7.68),
-    target: new Vector3(11.22, 1.86, -8.18),
+    position: new Vector3(7.45, 1.68, -3.82),
+    target: new Vector3(2.65, 1.68, -6.12),
   },
   night: {
-    position: new Vector3(5.16, 1.82, -7.93),
-    target: new Vector3(11.05, 1.88, -8.02),
+    position: new Vector3(7.4, 1.65, -3.88),
+    target: new Vector3(2.55, 1.66, -6.05),
   },
 };
 
@@ -564,10 +567,10 @@ export function HotelExperience() {
         {tier ? (
           <Canvas
             camera={{
-              fov: UE_CAMERA.verticalFov,
+              fov: WEB_CAMERA.verticalFov,
               near: 0.04,
               far: 60,
-              position: UE_CAMERA.position,
+              position: WEB_CAMERA.position,
             }}
             dpr={tier === "mobile" ? [0.72, 1.05] : [1, 1.55]}
             gl={{ antialias: tier === "premium", powerPreference: "high-performance" }}

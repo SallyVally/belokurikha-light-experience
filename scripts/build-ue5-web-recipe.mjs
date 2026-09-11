@@ -72,11 +72,18 @@ const cameraComponent = apartmentCamera.cameras[0];
 const sensorHeight = numberFromStruct(cameraComponent.filmback, "sensor_height") ?? 25.46;
 const focalLength = cameraComponent.current_focal_length ?? 28;
 const verticalFov = (2 * Math.atan(sensorHeight / (2 * focalLength))) / degrees;
-const cameraPosition = toWebPosition(apartmentCamera.location);
-const cameraDirection = toWebDirection(apartmentCamera.rotation);
-const cameraTarget = cameraPosition.map((value, index) =>
-  round(value + cameraDirection[index] * 6),
-);
+const ueActorPosition = toWebPosition(apartmentCamera.location);
+const ueActorDirection = toWebDirection(apartmentCamera.rotation);
+
+// The optimized GLB has Blender transforms baked into its room collections,
+// so the UE actor basis cannot be applied directly. These anchors are measured
+// in the final GLB and keep the camera clear of the corridor wall while aiming
+// through the bedroom toward the window.
+const cameraPosition = [7.35, 1.72, -3.75];
+const cameraTarget = [2.55, 1.72, -6];
+const cameraDirection = normalize(
+  cameraTarget.map((value, index) => value - cameraPosition[index]),
+).map(round);
 
 const localLights = audit.interesting_actors
   .filter(
@@ -138,6 +145,10 @@ const result = {
     verticalFov: round(verticalFov),
     postProcessBlendWeight: cameraComponent.post_process_blend_weight,
     postProcess: cameraComponent.post_process_settings,
+    ueActorMapping: {
+      position: ueActorPosition,
+      direction: ueActorDirection,
+    },
   },
   lighting: {
     count: localLights.length,
