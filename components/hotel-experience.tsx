@@ -1,6 +1,6 @@
 "use client";
 
-import { useGLTF, useProgress } from "@react-three/drei";
+import { useGLTF, useProgress, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   ArrowRight,
@@ -28,6 +28,8 @@ import {
   PMREMGenerator,
   RectAreaLight,
   SRGBColorSpace,
+  Shape,
+  ShapeGeometry,
   Vector2,
   Vector3,
 } from "three";
@@ -99,6 +101,8 @@ const modeProfile: Record<
     emissive: number;
     bloom: number;
     warmth: string;
+    exteriorTint: string;
+    ridgeTint: string;
   }
 > = {
   morning: {
@@ -110,6 +114,8 @@ const modeProfile: Record<
     emissive: 0.05,
     bloom: 0.34,
     warmth: "#fff1db",
+    exteriorTint: "#fffaf2",
+    ridgeTint: "#315342",
   },
   evening: {
     background: "#4a2b1d",
@@ -120,6 +126,8 @@ const modeProfile: Record<
     emissive: 0.72,
     bloom: 0.76,
     warmth: "#ffd6a4",
+    exteriorTint: "#ffe0bd",
+    ridgeTint: "#3b3d2d",
   },
   cinema: {
     background: "#120d0c",
@@ -130,6 +138,8 @@ const modeProfile: Record<
     emissive: 0.42,
     bloom: 0.92,
     warmth: "#dba47a",
+    exteriorTint: "#766057",
+    ridgeTint: "#1a211e",
   },
   night: {
     background: "#070808",
@@ -140,6 +150,8 @@ const modeProfile: Record<
     emissive: 0.2,
     bloom: 0.58,
     warmth: "#d98c56",
+    exteriorTint: "#26344d",
+    ridgeTint: "#0d1718",
   },
 };
 
@@ -217,6 +229,8 @@ function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode 
     const pmrem = new PMREMGenerator(gl);
     const room = new RoomEnvironment();
     const environment = pmrem.fromScene(room, 0.04).texture;
+    // Three.js scene state is intentionally configured imperatively.
+    // eslint-disable-next-line react-hooks/immutability
     scene.environment = environment;
     return () => {
       scene.environment = null;
@@ -228,7 +242,9 @@ function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode 
 
   useEffect(() => {
     const daylight = 0.36 + curtain / 156;
+    // eslint-disable-next-line react-hooks/immutability
     scene.environmentIntensity = profile.environment * daylight;
+    // eslint-disable-next-line react-hooks/immutability
     gl.toneMappingExposure = profile.exposure;
   }, [curtain, gl, profile, scene]);
 
@@ -240,7 +256,7 @@ function BloomPipeline({ mode }: { mode: SceneMode }) {
   const profile = modeProfile[mode];
   const composer = useMemo(() => new EffectComposer(gl), [gl]);
   const bloom = useMemo(
-    () => new UnrealBloomPass(new Vector2(1, 1), profile.bloom, 0.72, 0.78),
+    () => new UnrealBloomPass(new Vector2(1, 1), 0, 0.72, 0.78),
     [],
   );
 
@@ -257,6 +273,8 @@ function BloomPipeline({ mode }: { mode: SceneMode }) {
   }, [composer, gl, size]);
 
   useEffect(() => {
+    // Three.js passes expose their live controls as mutable properties.
+    // eslint-disable-next-line react-hooks/immutability
     bloom.strength = profile.bloom;
     bloom.radius = mode === "night" ? 0.82 : 0.68;
     bloom.threshold = mode === "morning" ? 0.88 : 0.72;
@@ -264,6 +282,103 @@ function BloomPipeline({ mode }: { mode: SceneMode }) {
 
   useFrame(() => composer.render(), 1);
   return null;
+}
+
+function LandscapeRidge({
+  color,
+  opacity,
+  position,
+  profile,
+}: {
+  color: string;
+  opacity: number;
+  position: [number, number, number];
+  profile: number[];
+}) {
+  const geometry = useMemo(() => {
+    const shape = new Shape();
+    const halfWidth = 13;
+    shape.moveTo(-halfWidth, -4);
+    shape.lineTo(-halfWidth, profile[0]);
+    profile.forEach((height, index) => {
+      const x = -halfWidth + (index / (profile.length - 1)) * halfWidth * 2;
+      shape.lineTo(x, height);
+    });
+    shape.lineTo(halfWidth, -4);
+    shape.closePath();
+    return new ShapeGeometry(shape);
+  }, [profile]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <mesh geometry={geometry} position={position} rotation={[0, Math.PI / 2, 0]}>
+      <meshBasicMaterial
+        color={color}
+        depthWrite={false}
+        opacity={opacity}
+        toneMapped
+        transparent
+      />
+    </mesh>
+  );
+}
+
+const FAR_RIDGE = [-0.2, 0.02, 0.16, 0.08, 0.31, 0.2, 0.4, 0.24, 0.34, 0.12, 0.25];
+const NEAR_RIDGE = [0.05, 0.28, 0.14, 0.46, 0.22, 0.54, 0.31, 0.42, 0.2, 0.38, 0.1];
+
+function ExteriorEnvironment({
+  curtain,
+  mode,
+  tier,
+}: {
+  curtain: number;
+  mode: SceneMode;
+  tier: AssetTier;
+}) {
+  const profile = modeProfile[mode];
+  const texture = useTexture(
+    tier === "premium"
+      ? "/environments/belokurikha-valley-2048.webp"
+      : "/environments/belokurikha-valley-1280.webp",
+  );
+  const configuredTexture = useMemo(() => {
+    const next = texture.clone();
+    next.colorSpace = SRGBColorSpace;
+    next.anisotropy = tier === "premium" ? 8 : 2;
+    next.needsUpdate = true;
+    return next;
+  }, [texture, tier]);
+  const landscapeColor = useMemo(
+    () =>
+      new Color(profile.exteriorTint).multiplyScalar(
+        0.18 + Math.pow(curtain / 100, 0.72) * 0.82,
+      ),
+    [curtain, profile.exteriorTint],
+  );
+
+  useEffect(() => () => configuredTexture.dispose(), [configuredTexture]);
+
+  return (
+    <group>
+      <mesh position={[-8, 1.72, -10.95]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[34, 12.75]} />
+        <meshBasicMaterial color={landscapeColor} map={configuredTexture} toneMapped />
+      </mesh>
+      <LandscapeRidge
+        color={profile.ridgeTint}
+        opacity={mode === "morning" ? 0.12 : 0.2}
+        position={[-2.6, 0.86, -10.4]}
+        profile={FAR_RIDGE}
+      />
+      <LandscapeRidge
+        color={profile.ridgeTint}
+        opacity={mode === "morning" ? 0.2 : 0.3}
+        position={[0.4, 0.72, -8.7]}
+        profile={NEAR_RIDGE}
+      />
+    </group>
+  );
 }
 
 function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
@@ -279,8 +394,8 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
     model.traverse((object) => {
       const mesh = object as Mesh;
       if (!mesh.isMesh) return;
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
+      mesh.castShadow = tier === "premium";
+      mesh.receiveShadow = tier === "premium";
       mesh.frustumCulled = true;
 
       const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -300,11 +415,17 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
           next.metalness = 0.92;
           next.roughness = 0.12;
         }
+        if (name.includes("ceiling_plaster")) {
+          next.color.set("#d8c5ac");
+          next.emissive = new Color("#2b2019");
+          next.emissiveIntensity = 0.14;
+          next.roughness = 0.86;
+        }
         return next;
       });
       mesh.material = Array.isArray(mesh.material) ? cloned : cloned[0];
     });
-  }, [gl, model]);
+  }, [gl, model, tier]);
 
   useEffect(() => {
     model.traverse((object) => {
@@ -378,9 +499,19 @@ function Scene({
         args={[mode === "morning" ? "#eaf4ff" : "#b9c4ce", "#22150f", 0.5 * daylight]}
       />
       <directionalLight
+        castShadow={tier === "premium"}
         color={mode === "morning" ? "#fff0d7" : "#ffc58f"}
         intensity={profile.key * daylight}
-        position={[9.2, 7.4, -4.5]}
+        position={[-5.5, 8.2, -1.5]}
+        shadow-bias={-0.00035}
+        shadow-camera-bottom={-8}
+        shadow-camera-far={32}
+        shadow-camera-left={-11}
+        shadow-camera-near={0.5}
+        shadow-camera-right={11}
+        shadow-camera-top={8}
+        shadow-mapSize-height={2048}
+        shadow-mapSize-width={2048}
       />
       <AreaLight
         intensity={12 * profile.practical}
@@ -407,6 +538,7 @@ function Scene({
         intensity={18 * profile.practical}
         position={[16.73, 1.95, -7.42]}
       />
+      <ExteriorEnvironment curtain={curtain} mode={mode} tier={tier} />
       <Apartment mode={mode} tier={tier} />
       <CinematicCamera mode={mode} parallax={parallax} />
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
@@ -453,10 +585,13 @@ export function HotelExperience() {
   const activeMode = sceneModes.find((item) => item.id === mode) ?? sceneModes[1];
 
   useEffect(() => {
-    setTier(chooseTier());
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setParallax(false);
-    }
+    const frame = requestAnimationFrame(() => {
+      setTier(chooseTier());
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setParallax(false);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
@@ -575,6 +710,7 @@ export function HotelExperience() {
             dpr={tier === "mobile" ? [0.72, 1.05] : [1, 1.55]}
             gl={{ antialias: tier === "premium", powerPreference: "high-performance" }}
             performance={{ min: 0.55 }}
+            shadows={tier === "premium"}
             onCreated={({ gl }) => {
               gl.outputColorSpace = SRGBColorSpace;
               gl.toneMapping = ACESFilmicToneMapping;
