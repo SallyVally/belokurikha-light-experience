@@ -55,7 +55,9 @@ import { Slider } from "@/components/ui/slider";
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
 
-const SCENE_ASSET_REVISION = "2026-09-11-lighting-curtains";
+const SCENE_ASSET_REVISION = "2026-09-12-curtain-dynamics";
+const CURTAIN_PANEL_X = 2.63;
+const CURTAIN_RAIL_X = 2.66;
 
 type ExperienceState = {
   mode: SceneMode;
@@ -485,6 +487,27 @@ function createCurtainGeometry(side: "near" | "far", tier: AssetTier) {
   const rows = tier === "premium" ? 24 : 12;
   const closedPositions = createCurtainPositions(side, 0, columns, rows, tier);
   const openPositions = createCurtainPositions(side, 1, columns, rows, tier);
+  const wavePositions = [0, Math.PI / 2].map((phase) => {
+    const positions = [...closedPositions];
+    const direction = side === "near" ? -1 : 1;
+
+    for (let row = 0; row <= rows; row += 1) {
+      const v = row / rows;
+      const looseness = Math.pow(1 - v, 1.18);
+
+      for (let column = 0; column <= columns; column += 1) {
+        const u = column / columns;
+        const index = (row * (columns + 1) + column) * 3;
+        const travelingWave = Math.sin(v * Math.PI * 2.35 + u * Math.PI * 0.7 + phase);
+        const trailingWave = Math.cos(v * Math.PI * 1.45 - u * Math.PI * 1.1 + phase);
+
+        positions[index] += travelingWave * looseness * 0.068;
+        positions[index + 2] += trailingWave * looseness * 0.024 * direction;
+      }
+    }
+
+    return new Float32BufferAttribute(positions, 3);
+  });
   const indices: number[] = [];
 
   for (let row = 0; row < rows; row += 1) {
@@ -499,7 +522,10 @@ function createCurtainGeometry(side: "near" | "far", tier: AssetTier) {
 
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(closedPositions, 3));
-  geometry.morphAttributes.position = [new Float32BufferAttribute(openPositions, 3)];
+  geometry.morphAttributes.position = [
+    new Float32BufferAttribute(openPositions, 3),
+    ...wavePositions,
+  ];
   geometry.morphTargetsRelative = false;
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
@@ -521,7 +547,12 @@ function CurtainPanel({
   const initialOpen = getWindowLight(curtain).open;
   const geometry = useMemo(() => createCurtainGeometry(side, tier), [side, tier]);
   const mesh = useRef<Mesh>(null);
-  const motion = useRef({ value: initialOpen, velocity: 0, sway: 0 });
+  const motion = useRef({
+    value: initialOpen,
+    velocity: 0,
+    waveEnergy: 0,
+    lastTarget: initialOpen,
+  });
   const color = {
     morning: "#725a4b",
     evening: "#5b4034",
@@ -535,6 +566,8 @@ function CurtainPanel({
     mesh.current?.updateMorphTargets();
     if (mesh.current?.morphTargetInfluences) {
       mesh.current.morphTargetInfluences[0] = motion.current.value;
+      mesh.current.morphTargetInfluences[1] = 0;
+      mesh.current.morphTargetInfluences[2] = 0;
     }
   }, [geometry]);
 
@@ -542,19 +575,27 @@ function CurtainPanel({
     if (!mesh.current?.morphTargetInfluences) return;
     const target = getWindowLight(curtain).open;
     const dt = Math.min(delta, 0.035);
-    const stiffness = side === "near" ? 43 : 32;
-    const damping = side === "near" ? 8.8 : 7.4;
+    const stiffness = side === "near" ? 36 : 27;
+    const damping = side === "near" ? 6.4 : 5.6;
     const state = motion.current;
+    const targetImpulse = Math.abs(target - state.lastTarget);
+    state.lastTarget = target;
     state.velocity += (target - state.value) * stiffness * dt;
     state.velocity *= Math.exp(-damping * dt);
     state.value = MathUtils.clamp(state.value + state.velocity * dt, -0.025, 1.025);
-    state.sway = Math.max(state.sway, Math.min(0.042, Math.abs(state.velocity) * 0.013));
-    state.sway *= Math.exp(-2.45 * dt);
+    state.waveEnergy = Math.max(
+      state.waveEnergy,
+      Math.min(1, targetImpulse * 5.5 + Math.abs(state.velocity) * 0.24),
+    );
+    state.waveEnergy *= Math.exp(-1.55 * dt);
 
     mesh.current.morphTargetInfluences[0] = state.value;
     const phase = side === "near" ? 0 : 0.72;
-    mesh.current.rotation.x = Math.sin(clock.elapsedTime * 5.1 + phase) * state.sway;
-    mesh.current.rotation.z = Math.cos(clock.elapsedTime * 4.15 + phase) * state.sway * 0.28;
+    const motionTime = clock.elapsedTime * (side === "near" ? 3.25 : 2.8) + phase;
+    mesh.current.morphTargetInfluences[1] = Math.sin(motionTime) * state.waveEnergy * 0.82;
+    mesh.current.morphTargetInfluences[2] = Math.cos(motionTime * 0.87) * state.waveEnergy * 0.58;
+    mesh.current.rotation.x = Math.sin(motionTime * 0.72) * state.waveEnergy * 0.018;
+    mesh.current.rotation.z = Math.cos(motionTime * 0.61) * state.waveEnergy * 0.007;
   });
 
   return (
@@ -562,7 +603,7 @@ function CurtainPanel({
       ref={mesh}
       castShadow={tier === "premium"}
       geometry={geometry}
-      position={[2.455, 2.91, getCurtainAnchor(side)]}
+      position={[CURTAIN_PANEL_X, 2.91, getCurtainAnchor(side)]}
       receiveShadow={tier === "premium"}
     >
       <meshStandardMaterial
@@ -589,17 +630,17 @@ function CurtainSystem({
     <group>
       <mesh
         castShadow={tier === "premium"}
-        position={[2.49, 2.945, -5.55]}
+        position={[CURTAIN_RAIL_X, 2.945, -5.55]}
         rotation={[Math.PI / 2, 0, 0]}
       >
         <cylinderGeometry args={[0.026, 0.026, 4.5, tier === "premium" ? 18 : 10]} />
         <meshStandardMaterial color="#3d3029" metalness={0.72} roughness={0.28} />
       </mesh>
-      <mesh position={[2.49, 2.945, -3.28]}>
+      <mesh position={[CURTAIN_RAIL_X, 2.945, -3.28]}>
         <sphereGeometry args={[0.055, 12, 8]} />
         <meshStandardMaterial color="#3d3029" metalness={0.72} roughness={0.28} />
       </mesh>
-      <mesh position={[2.49, 2.945, -7.82]}>
+      <mesh position={[CURTAIN_RAIL_X, 2.945, -7.82]}>
         <sphereGeometry args={[0.055, 12, 8]} />
         <meshStandardMaterial color="#3d3029" metalness={0.72} roughness={0.28} />
       </mesh>
