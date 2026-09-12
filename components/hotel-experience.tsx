@@ -18,7 +18,15 @@ import {
   Thermometer,
   Video,
 } from "lucide-react";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ACESFilmicToneMapping,
   AdditiveBlending,
@@ -34,6 +42,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PMREMGenerator,
+  PointLight,
   Points as ThreePoints,
   PointsMaterial,
   RectAreaLight,
@@ -119,6 +128,7 @@ const modeProfile: Record<
     warmth: string;
     exteriorTint: string;
     ridgeTint: string;
+    landscapeMix: [number, number, number];
   }
 > = {
   morning: {
@@ -133,6 +143,7 @@ const modeProfile: Record<
     warmth: "#fff1db",
     exteriorTint: "#fffaf2",
     ridgeTint: "#315342",
+    landscapeMix: [1, 0, 0],
   },
   evening: {
     background: "#4a2b1d",
@@ -146,6 +157,7 @@ const modeProfile: Record<
     warmth: "#ffd6a4",
     exteriorTint: "#ffe0bd",
     ridgeTint: "#3b3d2d",
+    landscapeMix: [0, 1, 0],
   },
   cinema: {
     background: "#120d0c",
@@ -157,8 +169,9 @@ const modeProfile: Record<
     bloom: 0.92,
     glare: 0.08,
     warmth: "#dba47a",
-    exteriorTint: "#766057",
+    exteriorTint: "#b9c2d0",
     ridgeTint: "#1a211e",
+    landscapeMix: [0, 0.38, 0.62],
   },
   night: {
     background: "#070808",
@@ -170,8 +183,9 @@ const modeProfile: Record<
     bloom: 0.58,
     glare: 0,
     warmth: "#d98c56",
-    exteriorTint: "#26344d",
+    exteriorTint: "#a9c4eb",
     ridgeTint: "#0d1718",
+    landscapeMix: [0, 0, 1],
   },
 };
 
@@ -220,6 +234,23 @@ const sceneShots: Record<SceneMode, { position: Vector3; target: Vector3 }> = {
   },
 };
 
+const sceneSunPositions: Record<SceneMode, Vector3> = {
+  morning: new Vector3(-6.4, 10.2, -3.3),
+  evening: new Vector3(-5.8, 5.4, -2.65),
+  cinema: new Vector3(-4.8, 2.6, -2.2),
+  night: new Vector3(-3.6, 7.2, -8.4),
+};
+
+const cameraFlareProfile: Record<
+  SceneMode,
+  { opacity: number; x: number; y: number }
+> = {
+  morning: { opacity: 0.28, x: 59, y: 23 },
+  evening: { opacity: 0.82, x: 61, y: 33 },
+  cinema: { opacity: 0.035, x: 69, y: 42 },
+  night: { opacity: 0, x: 78, y: 14 },
+};
+
 function kelvinToColor(kelvin: number) {
   if (kelvin >= 5000) return "#fff4df";
   return "#ffd2a0";
@@ -241,6 +272,7 @@ function AreaLight({
   width: number;
 }) {
   const light = useRef<RectAreaLight>(null);
+  const animatedIntensity = useRef(intensity);
 
   useLayoutEffect(() => {
     light.current?.lookAt(
@@ -249,6 +281,16 @@ function AreaLight({
       target?.[2] ?? position[2],
     );
   }, [position, target]);
+
+  useFrame((_, delta) => {
+    animatedIntensity.current = MathUtils.damp(
+      animatedIntensity.current,
+      intensity,
+      1.45,
+      delta,
+    );
+    if (light.current) light.current.intensity = animatedIntensity.current;
+  });
 
   return (
     <rectAreaLight
@@ -262,10 +304,33 @@ function AreaLight({
   );
 }
 
+function SceneBackdrop({ mode }: { mode: SceneMode }) {
+  const { scene } = useThree();
+  const color = useRef(new Color(modeProfile[mode].background));
+  const target = useMemo(() => new Color(modeProfile[mode].background), [mode]);
+
+  useLayoutEffect(() => {
+    scene.background = color.current;
+    return () => {
+      scene.background = null;
+    };
+  }, [scene]);
+
+  useFrame((_, delta) => {
+    color.current.lerp(target, 1 - Math.exp(-delta * 1.35));
+  });
+
+  return null;
+}
+
 function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode }) {
   const { gl, scene } = useThree();
   const profile = modeProfile[mode];
   const animatedOpen = useRef(getWindowLight(curtain).open);
+  const animatedProfile = useRef({
+    environment: profile.environment,
+    exposure: profile.exposure,
+  });
 
   useEffect(() => {
     RectAreaLightUniformsLib.init();
@@ -293,10 +358,22 @@ function SceneEnvironment({ curtain, mode }: { curtain: number; mode: SceneMode 
       delta,
     );
     const { sky } = getWindowLight(animatedOpen.current * 100);
+    animatedProfile.current.environment = MathUtils.damp(
+      animatedProfile.current.environment,
+      profile.environment,
+      1.35,
+      delta,
+    );
+    animatedProfile.current.exposure = MathUtils.damp(
+      animatedProfile.current.exposure,
+      profile.exposure,
+      1.35,
+      delta,
+    );
     // eslint-disable-next-line react-hooks/immutability
-    scene.environmentIntensity = profile.environment * (0.14 + sky * 0.28);
+    scene.environmentIntensity = animatedProfile.current.environment * (0.14 + sky * 0.28);
     // eslint-disable-next-line react-hooks/immutability
-    gl.toneMappingExposure = profile.exposure * (0.92 + sky * 0.08);
+    gl.toneMappingExposure = animatedProfile.current.exposure * (0.92 + sky * 0.08);
   });
 
   return null;
@@ -323,29 +400,35 @@ function BloomPipeline({ mode }: { mode: SceneMode }) {
     composer.setSize(size.width, size.height);
   }, [composer, gl, size]);
 
-  useEffect(() => {
-    // Three.js passes expose their live controls as mutable properties.
-    // eslint-disable-next-line react-hooks/immutability
-    bloom.strength = profile.bloom;
-    bloom.radius = mode === "night" ? 0.82 : 0.68;
-    bloom.threshold = mode === "morning" ? 0.88 : 0.72;
-  }, [bloom, mode, profile]);
-
-  useFrame(() => composer.render(), 1);
+  useFrame((_, delta) => {
+    bloom.strength = MathUtils.damp(bloom.strength, profile.bloom, 1.4, delta);
+    bloom.radius = MathUtils.damp(bloom.radius, mode === "night" ? 0.82 : 0.68, 1.4, delta);
+    bloom.threshold = MathUtils.damp(
+      bloom.threshold,
+      mode === "morning" ? 0.88 : 0.72,
+      1.4,
+      delta,
+    );
+    composer.render();
+  }, 1);
   return null;
 }
 
 function LandscapeRidge({
-  color,
+  mode,
   opacity,
   position,
   profile,
 }: {
-  color: string;
+  mode: SceneMode;
   opacity: number;
   position: [number, number, number];
   profile: number[];
 }) {
+  const material = useRef<MeshBasicMaterial>(null);
+  const animatedOpacity = useRef(opacity);
+  const animatedColor = useRef(new Color(modeProfile[mode].ridgeTint));
+  const targetColor = useMemo(() => new Color(modeProfile[mode].ridgeTint), [mode]);
   const geometry = useMemo(() => {
     const shape = new Shape();
     const halfWidth = 13;
@@ -362,10 +445,26 @@ function LandscapeRidge({
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
+  useFrame((_, delta) => {
+    const modeVisibility = mode === "morning" ? 0.62 : mode === "night" ? 0.82 : 1;
+    animatedOpacity.current = MathUtils.damp(
+      animatedOpacity.current,
+      opacity * modeVisibility,
+      1.3,
+      delta,
+    );
+    animatedColor.current.lerp(targetColor, 1 - Math.exp(-delta * 1.3));
+    if (material.current) {
+      material.current.opacity = animatedOpacity.current;
+      material.current.color.copy(animatedColor.current);
+    }
+  });
+
   return (
     <mesh geometry={geometry} position={position} rotation={[0, Math.PI / 2, 0]}>
       <meshBasicMaterial
-        color={color}
+        ref={material}
+        color={animatedColor.current}
         depthWrite={false}
         opacity={opacity}
         toneMapped
@@ -378,6 +477,34 @@ function LandscapeRidge({
 const FAR_RIDGE = [-0.2, 0.02, 0.16, 0.08, 0.31, 0.2, 0.4, 0.24, 0.34, 0.12, 0.25];
 const NEAR_RIDGE = [0.05, 0.28, 0.14, 0.46, 0.22, 0.54, 0.31, 0.42, 0.2, 0.38, 0.1];
 
+const landscapeVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const landscapeFragmentShader = `
+  varying vec2 vUv;
+  uniform sampler2D uMorning;
+  uniform sampler2D uEvening;
+  uniform sampler2D uNight;
+  uniform vec3 uWeights;
+  uniform vec3 uTint;
+  uniform float uBrightness;
+
+  void main() {
+    vec3 morning = texture2D(uMorning, vUv).rgb;
+    vec3 evening = texture2D(uEvening, vUv).rgb;
+    vec3 night = texture2D(uNight, vUv).rgb;
+    vec3 landscape = morning * uWeights.x + evening * uWeights.y + night * uWeights.z;
+    gl_FragColor = vec4(landscape * uTint * uBrightness, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 function ExteriorEnvironment({
   curtain,
   mode,
@@ -388,22 +515,51 @@ function ExteriorEnvironment({
   tier: AssetTier;
 }) {
   const profile = modeProfile[mode];
-  const texture = useTexture(
-    tier === "premium"
-      ? `/environments/belokurikha-valley-2048.webp?rev=${SCENE_ASSET_REVISION}`
-      : `/environments/belokurikha-valley-1280.webp?rev=${SCENE_ASSET_REVISION}`,
+  const suffix = tier === "premium" ? "2048" : "1280";
+  const texturePaths = useMemo(
+    () => [
+      `/environments/belokurikha-valley-morning-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
+      `/environments/belokurikha-valley-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
+      `/environments/belokurikha-valley-night-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
+    ],
+    [suffix],
   );
-  const configuredTexture = useMemo(() => {
-    const next = texture.clone();
-    next.colorSpace = SRGBColorSpace;
-    next.anisotropy = tier === "premium" ? 8 : 2;
-    next.needsUpdate = true;
-    return next;
-  }, [texture, tier]);
-  const landscapeMaterial = useRef<MeshBasicMaterial>(null);
+  const textures = useTexture(texturePaths);
+  const configuredTextures = useMemo(
+    () => textures.map((texture) => {
+      const next = texture.clone();
+      next.colorSpace = SRGBColorSpace;
+      next.anisotropy = tier === "premium" ? 8 : 2;
+      next.needsUpdate = true;
+      return next;
+    }),
+    [textures, tier],
+  );
+  const targetWeights = useMemo(
+    () => new Vector3(...profile.landscapeMix),
+    [profile.landscapeMix],
+  );
+  const targetTint = useMemo(() => new Color(profile.exteriorTint), [profile.exteriorTint]);
+  const animatedWeights = useRef(targetWeights.clone());
+  const animatedTint = useRef(targetTint.clone());
   const animatedOpen = useRef(getWindowLight(curtain).open);
-  const landscapeTint = useMemo(() => new Color(profile.exteriorTint), [profile.exteriorTint]);
-  const workingColor = useMemo(() => new Color(), []);
+  const landscapeMaterial = useMemo(
+    () => new ShaderMaterial({
+      depthWrite: true,
+      fragmentShader: landscapeFragmentShader,
+      toneMapped: true,
+      uniforms: {
+        uBrightness: { value: 1 },
+        uEvening: { value: configuredTextures[1] },
+        uMorning: { value: configuredTextures[0] },
+        uNight: { value: configuredTextures[2] },
+        uTint: { value: animatedTint.current.clone() },
+        uWeights: { value: animatedWeights.current.clone() },
+      },
+      vertexShader: landscapeVertexShader,
+    }),
+    [configuredTextures],
+  );
 
   // The landscape material is intentionally animated by the render loop.
   useFrame((_, delta) => {
@@ -413,34 +569,40 @@ function ExteriorEnvironment({
       3.6,
       delta,
     );
-    if (!landscapeMaterial.current) return;
+    animatedWeights.current.lerp(targetWeights, 1 - Math.exp(-delta * 1.35));
+    animatedTint.current.lerp(targetTint, 1 - Math.exp(-delta * 1.35));
     const brightness = 0.18 + Math.pow(animatedOpen.current, 0.72) * 0.82;
-    workingColor.copy(landscapeTint).multiplyScalar(brightness);
-    landscapeMaterial.current.color.copy(workingColor);
+    landscapeMaterial.uniforms.uBrightness.value = brightness;
+    landscapeMaterial.uniforms.uTint.value.copy(animatedTint.current);
+    landscapeMaterial.uniforms.uWeights.value.copy(animatedWeights.current);
   });
 
-  useEffect(() => () => configuredTexture.dispose(), [configuredTexture]);
+  useEffect(
+    () => () => {
+      configuredTextures.forEach((texture) => texture.dispose());
+      landscapeMaterial.dispose();
+    },
+    [configuredTextures, landscapeMaterial],
+  );
 
   return (
     <group>
-      <mesh position={[-8, 1.72, -10.95]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh
+        material={landscapeMaterial}
+        position={[-8, 1.72, -10.95]}
+        rotation={[0, Math.PI / 2, 0]}
+      >
         <planeGeometry args={[34, 12.75]} />
-        <meshBasicMaterial
-          ref={landscapeMaterial}
-          color={landscapeTint}
-          map={configuredTexture}
-          toneMapped
-        />
       </mesh>
       <LandscapeRidge
-        color={profile.ridgeTint}
-        opacity={mode === "morning" ? 0.12 : 0.2}
+        mode={mode}
+        opacity={0.2}
         position={[-2.6, 0.86, -10.4]}
         profile={FAR_RIDGE}
       />
       <LandscapeRidge
-        color={profile.ridgeTint}
-        opacity={mode === "morning" ? 0.2 : 0.3}
+        mode={mode}
+        opacity={0.3}
         position={[0.4, 0.72, -8.7]}
         profile={NEAR_RIDGE}
       />
@@ -708,11 +870,8 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
   const floorPatch = useRef<Mesh>(null);
   const windowGlow = useRef<Mesh>(null);
   const animatedOpen = useRef(getWindowLight(curtain).open);
-
-  useEffect(() => {
-    floorMaterial.uniforms.uColor.value.set(profile.warmth);
-    windowMaterial.uniforms.uColor.value.set(profile.warmth);
-  }, [floorMaterial, profile.warmth, windowMaterial]);
+  const animatedGlare = useRef(profile.glare);
+  const targetWarmth = useMemo(() => new Color(profile.warmth), [profile.warmth]);
 
   // Shader uniforms are intentionally mutated by the render loop.
   // eslint-disable-next-line react-hooks/immutability
@@ -724,10 +883,18 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
       delta,
     );
     const { sky, sun } = getWindowLight(animatedOpen.current * 100);
+    animatedGlare.current = MathUtils.damp(
+      animatedGlare.current,
+      profile.glare,
+      1.35,
+      delta,
+    );
+    floorMaterial.uniforms.uColor.value.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
+    windowMaterial.uniforms.uColor.value.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
     // eslint-disable-next-line react-hooks/immutability
-    floorMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.2;
+    floorMaterial.uniforms.uOpacity.value = sun * animatedGlare.current * 0.2;
     // eslint-disable-next-line react-hooks/immutability
-    windowMaterial.uniforms.uOpacity.value = sun * profile.glare * 0.12;
+    windowMaterial.uniforms.uOpacity.value = sun * animatedGlare.current * 0.12;
     if (floorPatch.current) {
       floorPatch.current.scale.y = MathUtils.lerp(0.12, 1, sky);
     }
@@ -797,12 +964,10 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
   const points = useRef<ThreePoints>(null);
   const material = useRef<PointsMaterial>(null);
   const animatedOpen = useRef(getWindowLight(curtain).open);
+  const animatedGlare = useRef(profile.glare);
+  const targetWarmth = useMemo(() => new Color(profile.warmth), [profile.warmth]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
-
-  useEffect(() => {
-    material.current?.color.set(profile.warmth);
-  }, [profile.warmth]);
 
   useFrame(({ clock }, delta) => {
     animatedOpen.current = MathUtils.damp(
@@ -812,8 +977,16 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
       delta,
     );
     const { sun } = getWindowLight(animatedOpen.current * 100);
+    animatedGlare.current = MathUtils.damp(
+      animatedGlare.current,
+      profile.glare,
+      1.35,
+      delta,
+    );
     if (material.current) {
-      material.current.opacity = sun * profile.glare * (tier === "premium" ? 0.38 : 0.2);
+      material.current.color.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
+      material.current.opacity =
+        sun * animatedGlare.current * (tier === "premium" ? 0.38 : 0.2);
     }
     if (points.current) {
       points.current.position.y = 1.96 + Math.sin(clock.elapsedTime * 0.48) * 0.025;
@@ -839,9 +1012,73 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
   );
 }
 
+function createStarGeometry(tier: AssetTier) {
+  const count = tier === "premium" ? 64 : 28;
+  const positions = new Float32Array(count * 3);
+  let seed = 7919;
+  const random = () => {
+    seed = (seed * 48271) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  for (let index = 0; index < count; index += 1) {
+    positions[index * 3] = -7.45 + random() * 0.12;
+    positions[index * 3 + 1] = 2.55 + random() * 3.2;
+    positions[index * 3 + 2] = -2.8 - random() * 6.2;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function NightStars({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
+  const geometry = useMemo(() => createStarGeometry(tier), [tier]);
+  const material = useRef<PointsMaterial>(null);
+  const visibility = useRef(mode === "night" ? 1 : mode === "cinema" ? 0.35 : 0);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useFrame(({ clock }, delta) => {
+    const target = mode === "night" ? 1 : mode === "cinema" ? 0.35 : 0;
+    visibility.current = MathUtils.damp(visibility.current, target, 1.2, delta);
+    if (material.current) {
+      const twinkle = 0.72 + Math.sin(clock.elapsedTime * 1.7) * 0.06;
+      material.current.opacity = visibility.current * twinkle;
+    }
+  });
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial
+        ref={material}
+        blending={AdditiveBlending}
+        color="#dceaff"
+        depthWrite={false}
+        opacity={0}
+        size={tier === "premium" ? 0.032 : 0.042}
+        sizeAttenuation
+        toneMapped={false}
+        transparent
+      />
+    </points>
+  );
+}
+
 function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const { gl } = useThree();
   const profile = modeProfile[mode];
+  const materialGroups = useRef({
+    all: [] as MeshStandardMaterial[],
+    practical: [] as MeshStandardMaterial[],
+  });
+  const animatedMaterial = useRef({
+    emissive: profile.emissive,
+    environment: mode === "morning" ? 0.92 : 0.64,
+    warmth: new Color(profile.warmth),
+  });
+  const targetWarmth = useMemo(() => new Color(profile.warmth), [profile.warmth]);
   const url =
     tier === "premium"
       ? `/models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`
@@ -851,6 +1088,8 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
 
   useEffect(() => {
     const anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
+    const allMaterials: MeshStandardMaterial[] = [];
+    const practicalMaterials: MeshStandardMaterial[] = [];
     model.traverse((object) => {
       const mesh = object as Mesh;
       if (!mesh.isMesh) return;
@@ -881,29 +1120,49 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
           next.emissiveIntensity = 0.025;
           next.roughness = 0.86;
         }
+        allMaterials.push(next);
+        if (practicalMaterialNames.has(next.name)) {
+          practicalMaterials.push(next);
+          next.toneMapped = false;
+          next.needsUpdate = true;
+        }
         return next;
       });
       mesh.material = Array.isArray(mesh.material) ? cloned : cloned[0];
     });
+    materialGroups.current = { all: allMaterials, practical: practicalMaterials };
+    return () => {
+      materialGroups.current = { all: [], practical: [] };
+    };
   }, [gl, model, tier]);
 
-  useEffect(() => {
-    model.traverse((object) => {
-      const mesh = object as Mesh;
-      if (!mesh.isMesh) return;
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const material of materials) {
-        const standard = material as MeshStandardMaterial;
-        if (!standard.isMeshStandardMaterial) continue;
-        standard.envMapIntensity = mode === "morning" ? 0.92 : 0.64;
-        if (!practicalMaterialNames.has(standard.name)) continue;
-        standard.emissive = new Color(profile.warmth);
-        standard.emissiveIntensity = 5.5 * profile.emissive;
-        standard.toneMapped = false;
-        standard.needsUpdate = true;
-      }
-    });
-  }, [mode, model, profile]);
+  useFrame((_, delta) => {
+    const targetEnvironment = mode === "morning" ? 0.92 : 0.64;
+    animatedMaterial.current.environment = MathUtils.damp(
+      animatedMaterial.current.environment,
+      targetEnvironment,
+      1.35,
+      delta,
+    );
+    animatedMaterial.current.emissive = MathUtils.damp(
+      animatedMaterial.current.emissive,
+      profile.emissive,
+      1.35,
+      delta,
+    );
+    animatedMaterial.current.warmth.lerp(
+      targetWarmth,
+      1 - Math.exp(-delta * 1.35),
+    );
+
+    for (const material of materialGroups.current.all) {
+      material.envMapIntensity = animatedMaterial.current.environment;
+    }
+    for (const material of materialGroups.current.practical) {
+      material.emissive.copy(animatedMaterial.current.warmth);
+      material.emissiveIntensity = 5.5 * animatedMaterial.current.emissive;
+    }
+  });
 
   return <primitive object={model} />;
 }
@@ -950,8 +1209,23 @@ function ExteriorLightRig({
   const sunLight = useRef<DirectionalLight>(null);
   const skyLight = useRef<HemisphereLight>(null);
   const portalLight = useRef<RectAreaLight>(null);
+  const practicalPoint = useRef<PointLight>(null);
   const animatedOpen = useRef(getWindowLight(curtain).open);
+  const animatedProfile = useRef({ key: profile.key, practical: profile.practical });
   const initialLight = getWindowLight(curtain);
+  const sunColor = useMemo(() => new Color({
+    morning: "#fff0d2",
+    evening: "#ffb56f",
+    cinema: "#b27d6b",
+    night: "#8ba9dc",
+  }[mode]), [mode]);
+  const skyColor = useMemo(() => new Color({
+    morning: "#d8ebff",
+    evening: "#c5b8ad",
+    cinema: "#78839b",
+    night: "#526a94",
+  }[mode]), [mode]);
+  const portalColor = useMemo(() => new Color(profile.warmth), [profile.warmth]);
 
   useLayoutEffect(() => {
     if (sunLight.current) {
@@ -969,15 +1243,35 @@ function ExteriorLightRig({
       delta,
     );
     const { sky, sun } = getWindowLight(animatedOpen.current * 100);
+    animatedProfile.current.key = MathUtils.damp(
+      animatedProfile.current.key,
+      profile.key,
+      1.35,
+      delta,
+    );
+    animatedProfile.current.practical = MathUtils.damp(
+      animatedProfile.current.practical,
+      profile.practical,
+      1.35,
+      delta,
+    );
+    const atmosphereEase = 1 - Math.exp(-delta * 1.35);
     if (skyLight.current) {
       skyLight.current.intensity = 0.055 + sky * 0.13;
+      skyLight.current.color.lerp(skyColor, atmosphereEase);
     }
     if (sunLight.current) {
       sunLight.current.intensity =
-        profile.key * sun * (mode === "morning" ? 1.2 : 1.05);
+        animatedProfile.current.key * sun * (mode === "morning" ? 1.12 : 1.02);
+      sunLight.current.color.lerp(sunColor, atmosphereEase);
+      sunLight.current.position.lerp(sceneSunPositions[mode], atmosphereEase);
     }
     if (portalLight.current) {
-      portalLight.current.intensity = profile.key * (0.04 + sky * 2.9);
+      portalLight.current.intensity = animatedProfile.current.key * (0.04 + sky * 2.65);
+      portalLight.current.color.lerp(portalColor, atmosphereEase);
+    }
+    if (practicalPoint.current) {
+      practicalPoint.current.intensity = 2.8 * animatedProfile.current.practical;
     }
   });
 
@@ -985,18 +1279,14 @@ function ExteriorLightRig({
     <>
       <hemisphereLight
         ref={skyLight}
-        args={[
-          mode === "morning" ? "#dcefff" : "#b8c4d0",
-          "#211611",
-          0.055 + initialLight.sky * 0.13,
-        ]}
+        args={["#b8c4d0", "#211611", 0.055 + initialLight.sky * 0.13]}
       />
       <directionalLight
         ref={sunLight}
         castShadow={tier === "premium"}
-        color={mode === "morning" ? "#fff2d9" : "#ffc180"}
+        color="#ffc180"
         intensity={
-          profile.key * initialLight.sun * (mode === "morning" ? 1.2 : 1.05)
+          profile.key * initialLight.sun * (mode === "morning" ? 1.12 : 1.02)
         }
         position={[-5.8, 7.8, -2.65]}
         shadow-bias={-0.00028}
@@ -1011,9 +1301,9 @@ function ExteriorLightRig({
       />
       <rectAreaLight
         ref={portalLight}
-        color={kelvinToColor(mode === "morning" ? 5600 : 4300)}
+        color="#ffd6a4"
         height={2.3}
-        intensity={profile.key * (0.04 + initialLight.sky * 2.9)}
+        intensity={profile.key * (0.04 + initialLight.sky * 2.65)}
         position={[2.08, 1.86, -5.55]}
         width={4.2}
       />
@@ -1024,10 +1314,11 @@ function ExteriorLightRig({
         width={3.2}
       />
       <pointLight
+        ref={practicalPoint}
         color="#ffd4aa"
         decay={2}
         distance={4.5}
-        intensity={2.8 * profile.practical}
+        intensity={2.8 * modeProfile.evening.practical}
         position={[7.9, 2.28, -8.35]}
       />
     </>
@@ -1047,7 +1338,7 @@ function Scene({
 }) {
   return (
     <>
-      <color attach="background" args={[modeProfile[mode].background]} />
+      <SceneBackdrop mode={mode} />
       <SceneEnvironment curtain={curtain} mode={mode} />
       <ExteriorLightRig curtain={curtain} mode={mode} tier={tier} />
       <ExteriorEnvironment curtain={curtain} mode={mode} tier={tier} />
@@ -1055,6 +1346,7 @@ function Scene({
       <CurtainSystem curtain={curtain} mode={mode} tier={tier} />
       <SunGlare curtain={curtain} mode={mode} tier={tier} />
       <DustMotes curtain={curtain} mode={mode} tier={tier} />
+      <NightStars mode={mode} tier={tier} />
       <CinematicCamera mode={mode} parallax={parallax} />
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
     </>
@@ -1072,6 +1364,24 @@ function LoadStatus() {
       <i>
         <b style={{ transform: `scaleX(${Math.max(0.02, progress / 100)})` }} />
       </i>
+    </div>
+  );
+}
+
+function CameraFlare({ curtain, mode }: { curtain: number; mode: SceneMode }) {
+  const profile = cameraFlareProfile[mode];
+  const { sun } = getWindowLight(curtain);
+  const style = {
+    left: `${profile.x}%`,
+    opacity: profile.opacity * Math.pow(sun, 1.3),
+    top: `${profile.y}%`,
+  } satisfies CSSProperties;
+
+  return (
+    <div className={`camera-flare camera-flare-${mode}`} style={style} aria-hidden="true">
+      <i className="camera-flare-core" />
+      <i className="camera-flare-ghosts" />
+      <i className="camera-flare-streak" />
     </div>
   );
 }
@@ -1252,6 +1562,7 @@ export function HotelExperience() {
       </div>
 
       <div className="cinematic-grade" aria-hidden="true" />
+      <CameraFlare curtain={curtain} mode={mode} />
       <LoadStatus />
 
       <header className="experience-header">
