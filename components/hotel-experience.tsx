@@ -39,17 +39,15 @@ import {
   HemisphereLight,
   MathUtils,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   PMREMGenerator,
   PointLight,
   Points as ThreePoints,
   PointsMaterial,
   RectAreaLight,
+  RepeatWrapping,
   SRGBColorSpace,
   ShaderMaterial,
-  Shape,
-  ShapeGeometry,
   Vector2,
   Vector3,
 } from "three";
@@ -64,7 +62,7 @@ import { Slider } from "@/components/ui/slider";
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
 
-const SCENE_ASSET_REVISION = "2026-09-12-curtain-dynamics";
+const SCENE_ASSET_REVISION = "2026-09-12-reality-pass";
 const CURTAIN_PANEL_X = 2.63;
 const CURTAIN_RAIL_X = 2.66;
 
@@ -414,69 +412,6 @@ function BloomPipeline({ mode }: { mode: SceneMode }) {
   return null;
 }
 
-function LandscapeRidge({
-  mode,
-  opacity,
-  position,
-  profile,
-}: {
-  mode: SceneMode;
-  opacity: number;
-  position: [number, number, number];
-  profile: number[];
-}) {
-  const material = useRef<MeshBasicMaterial>(null);
-  const animatedOpacity = useRef(opacity);
-  const animatedColor = useRef(new Color(modeProfile[mode].ridgeTint));
-  const targetColor = useMemo(() => new Color(modeProfile[mode].ridgeTint), [mode]);
-  const geometry = useMemo(() => {
-    const shape = new Shape();
-    const halfWidth = 13;
-    shape.moveTo(-halfWidth, -4);
-    shape.lineTo(-halfWidth, profile[0]);
-    profile.forEach((height, index) => {
-      const x = -halfWidth + (index / (profile.length - 1)) * halfWidth * 2;
-      shape.lineTo(x, height);
-    });
-    shape.lineTo(halfWidth, -4);
-    shape.closePath();
-    return new ShapeGeometry(shape);
-  }, [profile]);
-
-  useEffect(() => () => geometry.dispose(), [geometry]);
-
-  useFrame((_, delta) => {
-    const modeVisibility = mode === "morning" ? 0.62 : mode === "night" ? 0.82 : 1;
-    animatedOpacity.current = MathUtils.damp(
-      animatedOpacity.current,
-      opacity * modeVisibility,
-      1.3,
-      delta,
-    );
-    animatedColor.current.lerp(targetColor, 1 - Math.exp(-delta * 1.3));
-    if (material.current) {
-      material.current.opacity = animatedOpacity.current;
-      material.current.color.copy(animatedColor.current);
-    }
-  });
-
-  return (
-    <mesh geometry={geometry} position={position} rotation={[0, Math.PI / 2, 0]}>
-      <meshBasicMaterial
-        ref={material}
-        color={animatedColor.current}
-        depthWrite={false}
-        opacity={opacity}
-        toneMapped
-        transparent
-      />
-    </mesh>
-  );
-}
-
-const FAR_RIDGE = [-0.2, 0.02, 0.16, 0.08, 0.31, 0.2, 0.4, 0.24, 0.34, 0.12, 0.25];
-const NEAR_RIDGE = [0.05, 0.28, 0.14, 0.46, 0.22, 0.54, 0.31, 0.42, 0.2, 0.38, 0.1];
-
 const landscapeVertexShader = `
   varying vec2 vUv;
   void main() {
@@ -487,17 +422,34 @@ const landscapeVertexShader = `
 
 const landscapeFragmentShader = `
   varying vec2 vUv;
-  uniform sampler2D uMorning;
-  uniform sampler2D uEvening;
-  uniform sampler2D uNight;
+  uniform sampler2D uLandscape;
   uniform vec3 uWeights;
   uniform vec3 uTint;
+  uniform vec2 uParallax;
   uniform float uBrightness;
 
   void main() {
-    vec3 morning = texture2D(uMorning, vUv).rgb;
-    vec3 evening = texture2D(uEvening, vUv).rgb;
-    vec3 night = texture2D(uNight, vUv).rgb;
+    float nearField = 1.0 - smoothstep(0.12, 0.88, vUv.y);
+    vec2 sampleUv = clamp(vUv + uParallax * nearField, vec2(0.002), vec2(0.998));
+    vec3 source = texture2D(uLandscape, sampleUv).rgb;
+    float luminance = dot(source, vec3(0.2126, 0.7152, 0.0722));
+
+    // Every time of day is graded from the same pixels so mountains and
+    // buildings never morph between independently generated images.
+    vec3 morning = source * vec3(0.91, 0.97, 1.055);
+    morning = mix(morning, vec3(luminance), 0.045) + vec3(0.018, 0.024, 0.032);
+
+    vec3 evening = source * vec3(1.035, 0.985, 0.91);
+    evening = mix(evening, evening * evening, 0.08);
+
+    vec3 night = pow(max(source, vec3(0.0)), vec3(1.18)) * vec3(0.055, 0.095, 0.17);
+    float skyMask = smoothstep(0.57, 0.76, vUv.y);
+    vec3 nightSky = mix(vec3(0.008, 0.018, 0.045), vec3(0.025, 0.065, 0.13), vUv.y);
+    night = mix(night, nightSky + source * 0.025, skyMask * 0.86);
+    float cityBand = smoothstep(0.1, 0.22, vUv.y) * (1.0 - smoothstep(0.47, 0.58, vUv.y));
+    float cityLights = smoothstep(0.74, 0.96, luminance) * cityBand;
+    night += vec3(1.0, 0.48, 0.16) * cityLights * 1.65;
+
     vec3 landscape = morning * uWeights.x + evening * uWeights.y + night * uWeights.z;
     gl_FragColor = vec4(landscape * uTint * uBrightness, 1.0);
     #include <tonemapping_fragment>
@@ -516,24 +468,20 @@ function ExteriorEnvironment({
 }) {
   const profile = modeProfile[mode];
   const suffix = tier === "premium" ? "2048" : "1280";
-  const texturePaths = useMemo(
-    () => [
-      `/environments/belokurikha-valley-morning-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
-      `/environments/belokurikha-valley-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
-      `/environments/belokurikha-valley-night-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
-    ],
+  const texturePath = useMemo(
+    () => `/environments/belokurikha-valley-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
     [suffix],
   );
-  const textures = useTexture(texturePaths);
-  const configuredTextures = useMemo(
-    () => textures.map((texture) => {
-      const next = texture.clone();
+  const sourceTexture = useTexture(texturePath);
+  const landscapeTexture = useMemo(
+    () => {
+      const next = sourceTexture.clone();
       next.colorSpace = SRGBColorSpace;
       next.anisotropy = tier === "premium" ? 8 : 2;
       next.needsUpdate = true;
       return next;
-    }),
-    [textures, tier],
+    },
+    [sourceTexture, tier],
   );
   const targetWeights = useMemo(
     () => new Vector3(...profile.landscapeMix),
@@ -542,6 +490,8 @@ function ExteriorEnvironment({
   const targetTint = useMemo(() => new Color(profile.exteriorTint), [profile.exteriorTint]);
   const animatedWeights = useRef(targetWeights.clone());
   const animatedTint = useRef(targetTint.clone());
+  const animatedParallax = useRef(new Vector2());
+  const parallaxTarget = useMemo(() => new Vector2(), []);
   const animatedOpen = useRef(getWindowLight(curtain).open);
   const landscapeMaterial = useMemo(
     () => new ShaderMaterial({
@@ -550,19 +500,18 @@ function ExteriorEnvironment({
       toneMapped: true,
       uniforms: {
         uBrightness: { value: 1 },
-        uEvening: { value: configuredTextures[1] },
-        uMorning: { value: configuredTextures[0] },
-        uNight: { value: configuredTextures[2] },
+        uLandscape: { value: landscapeTexture },
+        uParallax: { value: new Vector2() },
         uTint: { value: animatedTint.current.clone() },
         uWeights: { value: animatedWeights.current.clone() },
       },
       vertexShader: landscapeVertexShader,
     }),
-    [configuredTextures],
+    [landscapeTexture],
   );
 
   // The landscape material is intentionally animated by the render loop.
-  useFrame((_, delta) => {
+  useFrame(({ camera }, delta) => {
     animatedOpen.current = MathUtils.damp(
       animatedOpen.current,
       getWindowLight(curtain).open,
@@ -571,18 +520,24 @@ function ExteriorEnvironment({
     );
     animatedWeights.current.lerp(targetWeights, 1 - Math.exp(-delta * 1.35));
     animatedTint.current.lerp(targetTint, 1 - Math.exp(-delta * 1.35));
+    parallaxTarget.set(
+      (camera.position.z - WEB_CAMERA.position[2]) * 0.013,
+      (camera.position.y - WEB_CAMERA.position[1]) * -0.01,
+    );
+    animatedParallax.current.lerp(parallaxTarget, 1 - Math.exp(-delta * 2.2));
     const brightness = 0.18 + Math.pow(animatedOpen.current, 0.72) * 0.82;
     landscapeMaterial.uniforms.uBrightness.value = brightness;
+    landscapeMaterial.uniforms.uParallax.value.copy(animatedParallax.current);
     landscapeMaterial.uniforms.uTint.value.copy(animatedTint.current);
     landscapeMaterial.uniforms.uWeights.value.copy(animatedWeights.current);
   });
 
   useEffect(
     () => () => {
-      configuredTextures.forEach((texture) => texture.dispose());
+      landscapeTexture.dispose();
       landscapeMaterial.dispose();
     },
-    [configuredTextures, landscapeMaterial],
+    [landscapeMaterial, landscapeTexture],
   );
 
   return (
@@ -592,20 +547,8 @@ function ExteriorEnvironment({
         position={[-8, 1.72, -10.95]}
         rotation={[0, Math.PI / 2, 0]}
       >
-        <planeGeometry args={[34, 12.75]} />
+        <planeGeometry args={[22, 8.5]} />
       </mesh>
-      <LandscapeRidge
-        mode={mode}
-        opacity={0.2}
-        position={[-2.6, 0.86, -10.4]}
-        profile={FAR_RIDGE}
-      />
-      <LandscapeRidge
-        mode={mode}
-        opacity={0.3}
-        position={[0.4, 0.72, -8.7]}
-        profile={NEAR_RIDGE}
-      />
     </group>
   );
 }
@@ -938,6 +881,8 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
 function createDustGeometry(tier: AssetTier) {
   const count = tier === "premium" ? 78 : 24;
   const positions = new Float32Array(count * 3);
+  const phases = new Float32Array(count);
+  const sizes = new Float32Array(count);
   let seed = 1847;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
@@ -950,24 +895,88 @@ function createDustGeometry(tier: AssetTier) {
     positions[index * 3] = -1.7 + along * 3.5;
     positions[index * 3 + 1] = (random() - 0.5) * 1.35;
     positions[index * 3 + 2] = (random() - 0.5) * spread * 2;
+    phases[index] = random() * Math.PI * 2;
+    sizes[index] = MathUtils.lerp(1.35, tier === "premium" ? 3.8 : 3.1, random());
   }
 
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("aPhase", new Float32BufferAttribute(phases, 1));
+  geometry.setAttribute("aSize", new Float32BufferAttribute(sizes, 1));
   geometry.computeBoundingSphere();
   return geometry;
 }
 
+const dustVertexShader = `
+  attribute float aPhase;
+  attribute float aSize;
+  uniform float uPixelRatio;
+  uniform float uTime;
+  varying float vShimmer;
+
+  void main() {
+    vec3 transformed = position;
+    transformed.y += sin(uTime * 0.31 + aPhase) * 0.035;
+    transformed.x += cos(uTime * 0.19 + aPhase * 1.7) * 0.022;
+    transformed.z += sin(uTime * 0.23 + aPhase * 0.73) * 0.018;
+    vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
+    float perspective = clamp(3.4 / max(-mvPosition.z, 0.35), 0.58, 1.7);
+    gl_PointSize = aSize * uPixelRatio * perspective;
+    gl_Position = projectionMatrix * mvPosition;
+    vShimmer = 0.72 + sin(uTime * 0.67 + aPhase * 2.1) * 0.18;
+  }
+`;
+
+const dustFragmentShader = `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  varying float vShimmer;
+
+  void main() {
+    vec2 point = gl_PointCoord - 0.5;
+    float radius = length(point);
+    if (radius > 0.5) discard;
+    float softDisc = smoothstep(0.5, 0.08, radius);
+    float core = exp(-radius * radius * 14.0);
+    float alpha = softDisc * core * uOpacity * vShimmer;
+    gl_FragColor = vec4(uColor, alpha);
+  }
+`;
+
 function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; tier: AssetTier }) {
+  const { gl } = useThree();
   const profile = modeProfile[mode];
   const geometry = useMemo(() => createDustGeometry(tier), [tier]);
   const points = useRef<ThreePoints>(null);
-  const material = useRef<PointsMaterial>(null);
   const animatedOpen = useRef(getWindowLight(curtain).open);
   const animatedGlare = useRef(profile.glare);
   const targetWarmth = useMemo(() => new Color(profile.warmth), [profile.warmth]);
+  const material = useMemo(
+    () => new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthTest: true,
+      depthWrite: false,
+      fragmentShader: dustFragmentShader,
+      toneMapped: false,
+      transparent: true,
+      uniforms: {
+        uColor: { value: new Color("#ffd6a5") },
+        uOpacity: { value: 0 },
+        uPixelRatio: { value: Math.min(gl.getPixelRatio(), 2) },
+        uTime: { value: 0 },
+      },
+      vertexShader: dustVertexShader,
+    }),
+    [gl],
+  );
 
-  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      material.dispose();
+    },
+    [geometry, material],
+  );
 
   useFrame(({ clock }, delta) => {
     animatedOpen.current = MathUtils.damp(
@@ -983,32 +992,25 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
       1.35,
       delta,
     );
-    if (material.current) {
-      material.current.color.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
-      material.current.opacity =
-        sun * animatedGlare.current * (tier === "premium" ? 0.38 : 0.2);
-    }
+    material.uniforms.uColor.value.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
+    material.uniforms.uOpacity.value =
+      sun * animatedGlare.current * (tier === "premium" ? 0.3 : 0.16);
+    material.uniforms.uTime.value = clock.elapsedTime;
+    material.uniforms.uPixelRatio.value = Math.min(gl.getPixelRatio(), 2);
     if (points.current) {
-      points.current.position.y = 1.96 + Math.sin(clock.elapsedTime * 0.48) * 0.025;
-      points.current.rotation.x = Math.sin(clock.elapsedTime * 0.21) * 0.012;
-      points.current.rotation.y = Math.cos(clock.elapsedTime * 0.17) * 0.009;
+      points.current.position.y = 1.96 + Math.sin(clock.elapsedTime * 0.17) * 0.012;
+      points.current.rotation.x = Math.sin(clock.elapsedTime * 0.11) * 0.006;
+      points.current.rotation.y = Math.cos(clock.elapsedTime * 0.09) * 0.004;
     }
   });
 
   return (
-    <points ref={points} geometry={geometry} position={[4.25, 1.96, -5.55]}>
-      <pointsMaterial
-        ref={material}
-        blending={AdditiveBlending}
-        color={profile.warmth}
-        depthWrite={false}
-        opacity={0}
-        size={tier === "premium" ? 0.022 : 0.027}
-        sizeAttenuation
-        toneMapped={false}
-        transparent
-      />
-    </points>
+    <points
+      ref={points}
+      geometry={geometry}
+      material={material}
+      position={[4.25, 1.96, -5.55]}
+    />
   );
 }
 
@@ -1069,6 +1071,22 @@ function NightStars({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
 function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const { gl } = useThree();
   const profile = modeProfile[mode];
+  const floorSuffix = tier === "premium" ? "2048" : "1024";
+  const floorSource = useTexture(
+    `/materials/smoked-oak-floor-${floorSuffix}.webp?rev=${SCENE_ASSET_REVISION}`,
+  );
+  const floorTexture = useMemo(
+    () => {
+      const next = floorSource.clone();
+      next.wrapS = RepeatWrapping;
+      next.wrapT = RepeatWrapping;
+      next.anisotropy = tier === "premium" ? 8 : 2;
+      next.colorSpace = SRGBColorSpace;
+      next.needsUpdate = true;
+      return next;
+    },
+    [floorSource, tier],
+  );
   const materialGroups = useRef({
     all: [] as MeshStandardMaterial[],
     practical: [] as MeshStandardMaterial[],
@@ -1085,6 +1103,55 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
       : `/models/AAELS-mobile.glb?rev=${SCENE_ASSET_REVISION}`;
   const gltf = useGLTF(url);
   const model = useMemo(() => gltf.scene.clone(true) as Group, [gltf.scene]);
+  const floorGeometry = useMemo(() => {
+    const surface = new BufferGeometry();
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const corners = [new Vector3(), new Vector3(), new Vector3()];
+    const edgeA = new Vector3();
+    const edgeB = new Vector3();
+    model.updateMatrixWorld(true);
+
+    model.traverse((object) => {
+      const mesh = object as Mesh;
+      if (!mesh.isMesh) return;
+      const geometry = mesh.geometry;
+      const position = geometry.getAttribute("position");
+      if (!position) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const index = geometry.getIndex();
+      const groups = geometry.groups.length
+        ? geometry.groups
+        : [{ start: 0, count: index?.count ?? position.count, materialIndex: 0 }];
+
+      for (const group of groups) {
+        if (!materials[group.materialIndex ?? 0]?.name.toLowerCase().includes("generic_wood_light")) {
+          continue;
+        }
+        for (let i = group.start; i + 2 < group.start + group.count; i += 3) {
+          for (let corner = 0; corner < 3; corner += 1) {
+            const vertexIndex = index ? index.getX(i + corner) : i + corner;
+            corners[corner]
+              .set(position.getX(vertexIndex), position.getY(vertexIndex), position.getZ(vertexIndex))
+              .applyMatrix4(mesh.matrixWorld);
+          }
+          if (!corners.every((point) => Math.abs(point.y - 1.015) < 0.035)) continue;
+          edgeA.subVectors(corners[1], corners[0]);
+          edgeB.subVectors(corners[2], corners[0]);
+          if (Math.abs(edgeA.cross(edgeB).y) < 0.5) continue;
+          for (const point of corners) {
+            positions.push(point.x, point.y + 0.004, point.z);
+            uvs.push(point.x / 2.4, -point.z / 2.6);
+          }
+        }
+      }
+    });
+
+    surface.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    surface.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+    surface.computeVertexNormals();
+    return surface;
+  }, [model]);
 
   useEffect(() => {
     const anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
@@ -1136,6 +1203,14 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
     };
   }, [gl, model, tier]);
 
+  useEffect(
+    () => () => {
+      floorGeometry.dispose();
+      floorTexture.dispose();
+    },
+    [floorGeometry, floorTexture],
+  );
+
   useFrame((_, delta) => {
     const targetEnvironment = mode === "morning" ? 0.92 : 0.64;
     animatedMaterial.current.environment = MathUtils.damp(
@@ -1164,7 +1239,24 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
     }
   });
 
-  return <primitive object={model} />;
+  return (
+    <group>
+      <primitive object={model} />
+      <mesh geometry={floorGeometry} receiveShadow>
+        <meshStandardMaterial
+          map={floorTexture}
+          color="#e8ded3"
+          roughness={0.82}
+          metalness={0}
+          envMapIntensity={0.28}
+          side={DoubleSide}
+          polygonOffset
+          polygonOffsetFactor={-1}
+          polygonOffsetUnits={-1}
+        />
+      </mesh>
+    </group>
+  );
 }
 
 function CinematicCamera({ mode, parallax }: { mode: SceneMode; parallax: boolean }) {
