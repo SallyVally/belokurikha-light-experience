@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AAELS — свет, который чувствует гостя",
+  title: "Белкур — интерактивный концепт номера",
   description:
-    "Интерактивная 3D-демонстрация адаптивного освещения премиального гостиничного номера.",
+    "Демонстрационный 3D-концепт для Белкур: откройте шторы и выберите атмосферу номера.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

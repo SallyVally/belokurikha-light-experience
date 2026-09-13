@@ -5,17 +5,12 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   ArrowRight,
   ChevronRight,
-  CloudSun,
-  Home,
-  LockKeyhole,
   Moon,
-  Music2,
   Play,
-  Search,
-  ShieldCheck,
+  RotateCw,
+  SlidersHorizontal,
   Sparkles,
   SunMedium,
-  Thermometer,
   Video,
 } from "lucide-react";
 import {
@@ -109,10 +104,10 @@ const sceneModes: Array<{
   note: string;
   icon: typeof SunMedium;
 }> = [
-  { id: "morning", label: "Утро", note: "Свет и климат", icon: SunMedium },
-  { id: "evening", label: "Вечер", note: "Мягкая встреча", icon: Sparkles },
-  { id: "cinema", label: "Кино", note: "Шторы и атмосфера", icon: Video },
-  { id: "night", label: "Ночь", note: "Тихий маршрут", icon: Moon },
+  { id: "morning", label: "Утро", note: "Дневной свет", icon: SunMedium },
+  { id: "evening", label: "Вечер", note: "Тёплый свет", icon: Sparkles },
+  { id: "cinema", label: "Кино", note: "Приглушённый свет", icon: Video },
+  { id: "night", label: "Ночь", note: "Вид на звёзды", icon: Moon },
 ];
 
 const modeProfile: Record<
@@ -1627,20 +1622,15 @@ function chooseTier(): AssetTier {
   return narrow || compactTouchDevice || constrainedHardware ? "mobile" : "premium";
 }
 
-const roomStatus = [
-  { icon: Home, label: "Статус номера", value: "Комфортный режим" },
-  { icon: Thermometer, label: "Климат", value: "22° · воздух в норме" },
-  { icon: ShieldCheck, label: "Безопасность", value: "Контур активен" },
-  { icon: Music2, label: "Музыка", value: "Belokurikha calm" },
-  { icon: LockKeyhole, label: "Замки", value: "Закрыто" },
-];
-
 export function HotelExperience() {
   const [mode, setMode] = useState<SceneMode>("evening");
   const [tier, setTier] = useState<AssetTier | null>(null);
   const [curtain, setCurtain] = useState(84);
   const [parallax, setParallax] = useState(true);
   const [demoPlaying, setDemoPlaying] = useState(false);
+  const [hasExplored, setHasExplored] = useState(false);
+  const [mobileCurtainOpen, setMobileCurtainOpen] = useState(false);
+  const [showRotateHint, setShowRotateHint] = useState(true);
   const demoTimers = useRef<number[]>([]);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
   const stopDemo = () => {
@@ -1655,12 +1645,24 @@ export function HotelExperience() {
   const activateMode = (nextMode: SceneMode) => {
     stopDemo();
     applyMode(nextMode);
+    setHasExplored(true);
+    setShowRotateHint(false);
   };
   const showAliceCurtainScenario = () => {
     stopDemo();
     setCurtain((current) => current > 50 ? 0 : 100);
+    setHasExplored(true);
+    setShowRotateHint(false);
+  };
+  const changeCurtain = (value: number) => {
+    stopDemo();
+    setCurtain(value);
+    setHasExplored(true);
+    setShowRotateHint(false);
   };
   const toggleDemo = () => {
+    setHasExplored(true);
+    setShowRotateHint(false);
     if (demoPlaying) {
       stopDemo();
       return;
@@ -1689,6 +1691,15 @@ export function HotelExperience() {
       }
     });
     return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    const landscape = window.matchMedia("(orientation: landscape)");
+    const dismissAfterRotation = () => {
+      if (landscape.matches) setShowRotateHint(false);
+    };
+    landscape.addEventListener("change", dismissAfterRotation);
+    return () => landscape.removeEventListener("change", dismissAfterRotation);
   }, []);
 
   useEffect(() => {
@@ -1795,7 +1806,7 @@ export function HotelExperience() {
   }, []);
 
   return (
-    <main className={`hotel-experience mode-${mode}`} id="experience">
+    <main className={`hotel-experience mode-${mode}${hasExplored ? " has-explored" : ""}`} id="experience">
       <div className="scene-shell" aria-label="Интерактивное трёхмерное пространство номера">
         {tier ? (
           <Canvas
@@ -1827,54 +1838,34 @@ export function HotelExperience() {
       <LoadStatus />
 
       <header className="experience-header">
-        <a className="brand" href="#experience" aria-label="AAELS — на главную">
-          <span className="brand-symbol">A</span>
-          <span>AAELS</span>
+        <a className="brand" href="#experience" aria-label="Белкур — демонстрационный концепт">
+          <span className="brand-symbol" aria-hidden="true">✦</span>
+          <span className="brand-name">БЕЛКУР <small>концепт</small></span>
         </a>
-        <nav className="main-nav" aria-label="Основная навигация">
-          <a href="#experience">Пространство</a>
-          <a href="#scenarios">Сценарии</a>
-          <a href="#technology">Технологии</a>
-          <a href="#about">О проекте</a>
-        </nav>
         <div className="header-actions">
-          <button type="button" className="icon-button" aria-label="Поиск">
-            <Search aria-hidden="true" />
-          </button>
           <button type="button" className="demo-button" onClick={toggleDemo}>
-            {demoPlaying ? "Остановить демо" : "Запустить демо"} <ArrowRight aria-hidden="true" />
+            {demoPlaying ? "Остановить показ" : "Показать демо"} <ArrowRight aria-hidden="true" />
           </button>
         </div>
       </header>
 
       <section className="hero-copy" aria-live="polite">
-        <p className="hero-kicker">Интеллектуальная среда · Белокуриха</p>
+        <p className="hero-kicker">Интерактивный концепт · Белокуриха</p>
         <h1>
-          Номер, который
+          Пространство
           <br />
-          чувствует гостя
+          в вашем ритме
         </h1>
         <p className="hero-description">
-          Свет, климат и приватность меняются вместе с вашим ритмом. Пространство
-          остаётся живым — прямо в браузере.
+          <span className="desktop-description">Откройте шторы, выберите время суток и почувствуйте, как меняется атмосфера номера.</span>
+          <span className="mobile-description">Откройте шторы. Выберите время суток.</span>
         </p>
       </section>
 
-      <div
-        className="weather"
-        aria-label={mode === "night" ? "Белокуриха, Алтай, ночной сценарий" : "Белокуриха, Алтай, плюс 18 градусов"}
-      >
-        {mode === "night" ? <Moon aria-hidden="true" /> : <CloudSun aria-hidden="true" />}
-        <span>
-          <small>Белокуриха, Алтай</small>
-          <strong>{mode === "night" ? "Ночь" : "+18°"}</strong>
-        </span>
-      </div>
-
-      <aside className="room-panel glass-panel" id="technology" aria-label="Состояние номера">
+      <aside className="room-panel glass-panel" id="technology" aria-label="Управление шторами">
         <div className="panel-title">
-          <span>Среда номера</span>
-          <small>все системы онлайн</small>
+          <span>Управление</span>
+          <small>3D-сцена</small>
         </div>
 
         <div className="curtain-card">
@@ -1894,24 +1885,11 @@ export function HotelExperience() {
             step={1}
             value={[curtain]}
             onValueChange={(value) => {
-              stopDemo();
-              setCurtain(value[0] ?? 84);
+              changeCurtain(value[0] ?? 84);
             }}
           />
         </div>
-
-        <ul className="status-list">
-          {roomStatus.map((item) => (
-            <li key={item.label}>
-              <item.icon aria-hidden="true" />
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.value}</small>
-              </span>
-              <ChevronRight aria-hidden="true" />
-            </li>
-          ))}
-        </ul>
+        <p className="curtain-note">Положение штор меняет свет в номере.</p>
       </aside>
 
       <aside className="assistant-panel glass-panel">
@@ -1921,7 +1899,7 @@ export function HotelExperience() {
           </span>
           <span>
             <strong>Алиса</strong>
-            <small>Концепт голосового управления</small>
+            <small>Пример голосового сценария</small>
           </span>
         </div>
         <blockquote>
@@ -1940,13 +1918,13 @@ export function HotelExperience() {
         >
           <Play aria-hidden="true" />
         </button>
-        <small className="listening-label">3D-демо без подключения к Яндексу</small>
+        <small className="listening-label">Демонстрация, без подключения к Яндексу</small>
       </aside>
 
       <aside className="scenario-panel glass-panel" id="scenarios">
         <div className="panel-title">
-          <span>Быстрые сценарии</span>
-          <small>{tier === "premium" ? "cinematic render" : "adaptive render"}</small>
+          <span>Время и атмосфера</span>
+          <small>выберите сценарий</small>
         </div>
         <div className="scenario-list">
           {sceneModes.map((item) => (
@@ -1968,41 +1946,78 @@ export function HotelExperience() {
         </div>
       </aside>
 
-      <div className="mobile-status glass-panel">
-        <button
-          type="button"
-          className="mobile-alice-trigger"
-          aria-label="Показать сценарий Алисы со шторами"
-          onClick={showAliceCurtainScenario}
-        >
-          <img src="/brand/alice-logo.svg" alt="" />
-          Алиса · демо
-        </button>
-        <span>Шторы {curtain}%</span>
+      <div className="mobile-controls">
+        {showRotateHint && (
+          <div className="rotate-hint glass-panel">
+            <RotateCw aria-hidden="true" />
+            <span>Поверните телефон — откройте панораму</span>
+            <button type="button" onClick={() => setShowRotateHint(false)}>Смотреть вертикально</button>
+          </div>
+        )}
+        {mobileCurtainOpen && (
+          <div className="mobile-curtain-panel glass-panel">
+            <div className="curtain-heading">
+              <span>Шторы</span>
+              <strong>Открыты на {curtain}%</strong>
+            </div>
+            <Slider
+              aria-label="Положение штор"
+              min={0}
+              max={100}
+              step={1}
+              value={[curtain]}
+              onValueChange={(value) => changeCurtain(value[0] ?? 84)}
+            />
+          </div>
+        )}
+        <div className="mobile-actions glass-panel">
+          <button
+            type="button"
+            className="mobile-curtain-toggle"
+            aria-expanded={mobileCurtainOpen}
+            onClick={() => {
+              setMobileCurtainOpen((open) => !open);
+              setHasExplored(true);
+              setShowRotateHint(false);
+            }}
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            <span>Шторы</span>
+            <strong>{curtain}%</strong>
+          </button>
+          <button
+            type="button"
+            className="mobile-alice-trigger"
+            aria-label="Показать демонстрационную команду Алисы для штор"
+            onClick={showAliceCurtainScenario}
+          >
+            <img src="/brand/alice-logo.svg" alt="" />
+            <span>Алиса · демо</span>
+          </button>
+        </div>
+        <nav className="mobile-scenarios" aria-label="Сценарии освещения">
+          {sceneModes.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={item.id === mode ? "is-active" : ""}
+              aria-label={item.label}
+              aria-pressed={item.id === mode}
+              onClick={() => activateMode(item.id)}
+            >
+              <item.icon aria-hidden="true" />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
       </div>
 
-      <nav className="mobile-scenarios" aria-label="Сценарии освещения">
-        {sceneModes.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={item.id === mode ? "is-active" : ""}
-            aria-label={item.label}
-            aria-pressed={item.id === mode}
-            onClick={() => activateMode(item.id)}
-          >
-            <item.icon aria-hidden="true" />
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </nav>
-
       <footer className="experience-footer" id="about">
-        <span>AAELS · immersive hospitality</span>
+        <span>Демонстрационный концепт для Белкур</span>
         <button type="button" onClick={() => setParallax((value) => !value)}>
           {parallax ? "Живой ракурс включён" : "Камера зафиксирована"}
         </button>
-        <span>UE5 look · WebGL experience</span>
+        <span>Сцена не отражает точную планировку объекта</span>
       </footer>
     </main>
   );

@@ -214,7 +214,7 @@ a:focus-visible {
   left: 28px;
   z-index: 12;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   min-height: 48px;
   gap: clamp(24px, 5vw, 78px);
@@ -229,6 +229,20 @@ a:focus-visible {
   font-weight: 500;
   letter-spacing: 0.34em;
   text-decoration: none;
+}
+
+.brand-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.brand-name small {
+  color: rgba(255, 248, 238, 0.64);
+  font-size: 0.63rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
 }
 
 .brand-symbol {
@@ -291,6 +305,7 @@ a:focus-visible {
 .header-actions {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 14px;
 }
 
@@ -368,6 +383,10 @@ a:focus-visible {
   color: rgba(255, 248, 238, 0.78);
   font-size: clamp(1rem, 1.25vw, 1.14rem);
   line-height: 1.55;
+}
+
+.mobile-description {
+  display: none;
 }
 
 .weather {
@@ -485,6 +504,13 @@ a:focus-visible {
 
 .curtain-preview b {
   flex: 1;
+}
+
+.curtain-note {
+  margin: 8px 4px 2px;
+  color: rgba(255, 248, 238, 0.7);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .status-list {
@@ -782,8 +808,7 @@ a:focus-visible {
   box-shadow: 0 0 14px rgba(237, 187, 118, 0.5);
 }
 
-.mobile-scenarios,
-.mobile-status {
+.mobile-controls {
   display: none;
 }
 
@@ -835,16 +860,17 @@ a:focus-visible {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-width: 1100px) and (max-height: 600px) {
   .hotel-experience {
-    min-height: 540px;
+    height: 100dvh;
+    min-height: 0;
   }
 
   .experience-header {
-    top: 14px;
+    top: max(12px, env(safe-area-inset-top));
     right: 18px;
     left: 18px;
-    grid-template-columns: 1fr auto;
+    gap: 10px;
   }
 
   .main-nav,
@@ -852,7 +878,8 @@ a:focus-visible {
   .room-panel,
   .assistant-panel,
   .scenario-panel,
-  .experience-footer {
+  .experience-footer,
+  .weather {
     display: none;
   }
 
@@ -866,101 +893,114 @@ a:focus-visible {
   }
 
   .demo-button {
-    min-height: 40px;
-    gap: 14px;
+    min-height: 44px;
+    gap: 9px;
     padding: 0 16px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
   }
 
   .hero-copy {
     top: 88px;
     left: 20px;
     width: min(560px, calc(100vw - 40px));
+    transition: opacity 550ms ease, transform 550ms ease;
   }
 
   .hero-copy h1 {
-    font-size: clamp(3.1rem, 9vw, 4.9rem);
+    font-size: clamp(2.5rem, 7vw, 4.2rem);
   }
 
   .hero-description {
     max-width: 430px;
+    font-size: 1rem;
   }
 
-  .weather {
+  .desktop-description {
     display: none;
   }
 
-  .mobile-status {
+  .mobile-description {
+    display: inline;
+  }
+
+  .has-explored .hero-copy {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+
+  .mobile-controls {
     position: absolute;
-    right: 14px;
-    bottom: 88px;
-    left: 14px;
-    z-index: 7;
-    display: flex;
-    min-height: 42px;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 7px 12px;
-    border-radius: 14px;
-    color: rgba(255, 248, 238, 0.74);
-    font-size: 0.68rem;
-  }
-
-  .mobile-status span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .mobile-status svg {
-    width: 15px;
-  }
-
-.mobile-status button {
-  padding: 6px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 0.62rem;
-}
-
-.mobile-status .mobile-alice-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px 3px 3px;
-  color: #fff8ee;
-  font-size: 0.72rem;
-}
-
-.mobile-alice-trigger img {
-  width: 26px;
-  height: 26px;
-}
-
-  .mobile-scenarios {
-    position: absolute;
-    right: 10px;
+    right: 12px;
     bottom: max(10px, env(safe-area-inset-bottom));
-    left: 10px;
+    left: 12px;
     z-index: 8;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .mobile-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 4px;
+    padding: 4px;
+    border-radius: 17px;
+  }
+
+  .mobile-actions button {
+    display: flex;
+    min-width: 0;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 5px 7px;
+    border: 0;
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.045);
+    color: #fff8ee;
+    cursor: pointer;
+    font-size: 0.76rem;
+  }
+
+  .mobile-actions button:active {
+    background: rgba(244, 201, 140, 0.2);
+  }
+
+  .mobile-actions svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+  }
+
+  .mobile-curtain-toggle strong {
+    color: #f4ca8e;
+    font-size: 0.77rem;
+  }
+
+  .mobile-alice-trigger img {
+    width: 27px;
+    height: 27px;
+    flex: 0 0 auto;
+  }
+
+  .mobile-scenarios {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
     padding: 5px;
     border: 1px solid rgba(255, 248, 238, 0.18);
     border-radius: 18px;
-    background: rgba(22, 14, 10, 0.72);
+    background: rgba(22, 14, 10, 0.76);
     box-shadow: 0 22px 60px rgba(8, 4, 2, 0.4);
     backdrop-filter: blur(20px) saturate(132%);
   }
 
   .mobile-scenarios button {
     display: grid;
-    min-height: 58px;
+    min-height: 56px;
     place-items: center;
     align-content: center;
-    gap: 4px;
+    gap: 3px;
     border: 1px solid transparent;
     border-radius: 14px;
     background: transparent;
@@ -979,7 +1019,81 @@ a:focus-visible {
   }
 
   .mobile-scenarios span {
-    font-size: 0.62rem;
+    font-size: 0.75rem;
+  }
+
+  .mobile-curtain-panel,
+  .rotate-hint {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    left: 0;
+    border-radius: 17px;
+  }
+
+  .mobile-curtain-panel {
+    display: grid;
+    gap: 18px;
+    padding: 16px 18px 22px;
+  }
+
+  .mobile-curtain-panel .curtain-heading {
+    font-size: 0.9rem;
+  }
+
+  .mobile-curtain-panel .curtain-heading strong {
+    font-size: 0.8rem;
+  }
+
+  .mobile-curtain-panel [data-slot="slider"] {
+    min-height: 44px;
+  }
+
+  .mobile-curtain-panel [data-slot="slider-track"] {
+    height: 8px;
+  }
+
+  .mobile-curtain-panel [data-slot="slider-thumb"] {
+    width: 24px;
+    height: 24px;
+  }
+
+  .rotate-hint {
+    display: none;
+    align-items: center;
+    gap: 11px;
+    padding: 12px;
+    color: #fff8ee;
+    font-size: 0.82rem;
+    line-height: 1.3;
+  }
+
+  .rotate-hint svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    color: #f4ca8e;
+  }
+
+  .rotate-hint span {
+    flex: 1;
+  }
+
+  .rotate-hint button {
+    min-height: 44px;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 248, 238, 0.3);
+    border-radius: 10px;
+    background: rgba(20, 12, 8, 0.32);
+    color: #fff8ee;
+    cursor: pointer;
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 900px) and (orientation: portrait) {
+  .rotate-hint {
+    display: flex;
   }
 }
 
@@ -991,36 +1105,95 @@ a:focus-visible {
 
   .brand {
     gap: 9px;
-    font-size: 0.72rem;
-    letter-spacing: 0.26em;
+    font-size: 0.8rem;
+    letter-spacing: 0.2em;
+  }
+
+  .brand-name {
+    display: grid;
+    gap: 1px;
+  }
+
+  .brand-name small {
+    font-size: 0.61rem;
   }
 
   .demo-button {
     gap: 8px;
     padding: 0 12px;
+    font-size: 0.72rem;
   }
 
   .hero-copy {
-    top: 80px;
+    top: 83px;
   }
 
   .hero-kicker {
     margin-bottom: 7px;
-    font-size: 0.61rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
   }
 
   .hero-copy h1 {
-    font-size: clamp(2.7rem, 13vw, 4.1rem);
-    line-height: 0.94;
+    font-size: clamp(2rem, 9vw, 3rem);
+    line-height: 1.02;
   }
 
   .hero-description {
     max-width: 310px;
-    margin-top: 12px;
-    font-size: 0.91rem;
+    margin-top: 9px;
+    font-size: 1rem;
     line-height: 1.45;
   }
+}
 
+@media (max-width: 1100px) and (max-height: 600px) and (orientation: landscape) {
+  .experience-header {
+    top: max(6px, env(safe-area-inset-top));
+    right: 16px;
+    left: 16px;
+  }
+
+  .hero-copy {
+    top: 64px;
+    left: 18px;
+    width: min(320px, 42vw);
+  }
+
+  .hero-kicker {
+    margin-bottom: 5px;
+    font-size: 0.68rem;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(1.8rem, 3.7vw, 2.55rem);
+    line-height: 1.02;
+  }
+
+  .hero-description {
+    display: none;
+  }
+
+  .mobile-controls {
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: max(14px, env(safe-area-inset-left));
+    grid-template-columns: minmax(190px, 280px) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .mobile-actions {
+    grid-column: 1;
+  }
+
+  .mobile-scenarios {
+    grid-column: 2;
+  }
+
+  .mobile-curtain-panel {
+    right: auto;
+    width: min(300px, 45vw);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
