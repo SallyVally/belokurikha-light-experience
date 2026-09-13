@@ -8,9 +8,9 @@ import {
   CloudSun,
   Home,
   LockKeyhole,
-  Mic2,
   Moon,
   Music2,
+  Play,
   Search,
   ShieldCheck,
   Sparkles,
@@ -1639,12 +1639,10 @@ export function HotelExperience() {
   const [mode, setMode] = useState<SceneMode>("evening");
   const [tier, setTier] = useState<AssetTier | null>(null);
   const [curtain, setCurtain] = useState(84);
-  const [listening, setListening] = useState(false);
   const [parallax, setParallax] = useState(true);
   const [demoPlaying, setDemoPlaying] = useState(false);
   const demoTimers = useRef<number[]>([]);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
-  const activeMode = sceneModes.find((item) => item.id === mode) ?? sceneModes[1];
   const stopDemo = () => {
     demoTimers.current.forEach((timer) => window.clearTimeout(timer));
     demoTimers.current = [];
@@ -1657,6 +1655,10 @@ export function HotelExperience() {
   const activateMode = (nextMode: SceneMode) => {
     stopDemo();
     applyMode(nextMode);
+  };
+  const showAliceCurtainScenario = () => {
+    stopDemo();
+    setCurtain((current) => current > 50 ? 0 : 100);
   };
   const toggleDemo = () => {
     if (demoPlaying) {
@@ -1912,18 +1914,18 @@ export function HotelExperience() {
         </ul>
       </aside>
 
-      <aside className={`assistant-panel glass-panel ${listening ? "is-listening" : ""}`}>
+      <aside className="assistant-panel glass-panel">
         <div className="assistant-heading">
           <span className="assistant-orb">
-            <Sparkles aria-hidden="true" />
+            <img src="/brand/alice-logo.svg" alt="" />
           </span>
           <span>
-            <strong>AI-консьерж</strong>
-            <small>Голосовое управление номером</small>
+            <strong>Алиса</strong>
+            <small>Концепт голосового управления</small>
           </span>
         </div>
         <blockquote>
-          {listening ? "Слушаю вас…" : `«Включи сценарий “${activeMode.label}”»`}
+          {curtain > 50 ? "«Алиса, закрой шторы»" : "«Алиса, открой шторы»"}
         </blockquote>
         <div className="voice-wave" aria-hidden="true">
           {Array.from({ length: 18 }).map((_, index) => (
@@ -1933,13 +1935,12 @@ export function HotelExperience() {
         <button
           type="button"
           className="voice-button"
-          aria-label={listening ? "Остановить прослушивание" : "Активировать голосовое управление"}
-          aria-pressed={listening}
-          onClick={() => setListening((value) => !value)}
+          aria-label="Показать сценарий Алисы со шторами"
+          onClick={showAliceCurtainScenario}
         >
-          <Mic2 aria-hidden="true" />
+          <Play aria-hidden="true" />
         </button>
-        <small className="listening-label">{listening ? "Слушаю…" : "Нажмите, чтобы говорить"}</small>
+        <small className="listening-label">3D-демо без подключения к Яндексу</small>
       </aside>
 
       <aside className="scenario-panel glass-panel" id="scenarios">
@@ -1968,13 +1969,16 @@ export function HotelExperience() {
       </aside>
 
       <div className="mobile-status glass-panel">
-        <span>
-          <Thermometer aria-hidden="true" /> 22°
-        </span>
-        <span>Шторы {curtain}%</span>
-        <button type="button" onClick={() => setParallax((value) => !value)}>
-          {parallax ? "Живой ракурс" : "Ракурс зафиксирован"}
+        <button
+          type="button"
+          className="mobile-alice-trigger"
+          aria-label="Показать сценарий Алисы со шторами"
+          onClick={showAliceCurtainScenario}
+        >
+          <img src="/brand/alice-logo.svg" alt="" />
+          Алиса · демо
         </button>
+        <span>Шторы {curtain}%</span>
       </div>
 
       <nav className="mobile-scenarios" aria-label="Сценарии освещения">

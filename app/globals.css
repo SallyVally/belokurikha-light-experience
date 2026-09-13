@@ -583,13 +583,12 @@ a:focus-visible {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
-  background:
-    radial-gradient(circle at 32% 26%, #fff 0 3%, #c892ff 18%, #832fee 58%, #3a0f8f 100%);
-  box-shadow: 0 0 25px rgba(151, 64, 255, 0.44);
+  box-shadow: 0 0 25px rgba(113, 55, 255, 0.38);
 }
 
-.assistant-orb svg {
-  width: 17px;
+.assistant-orb img {
+  width: 36px;
+  height: 36px;
 }
 
 .assistant-panel blockquote {
@@ -918,12 +917,26 @@ a:focus-visible {
     width: 15px;
   }
 
-  .mobile-status button {
-    padding: 6px 8px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    font-size: 0.62rem;
-  }
+.mobile-status button {
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.62rem;
+}
+
+.mobile-status .mobile-alice-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px 3px 3px;
+  color: #fff8ee;
+  font-size: 0.72rem;
+}
+
+.mobile-alice-trigger img {
+  width: 26px;
+  height: 26px;
+}
 
   .mobile-scenarios {
     position: absolute;
@@ -1008,9 +1021,6 @@ a:focus-visible {
     line-height: 1.45;
   }
 
-  .mobile-status span:nth-child(2) {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
