@@ -16,6 +16,7 @@ import {
 import {
   type CSSProperties,
   Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1265,7 +1266,7 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   }, [model]);
 
   useEffect(() => {
-    const anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
+    const anisotropy = Math.min(tier === "mobile" ? 2 : 8, gl.capabilities.getMaxAnisotropy());
     const allMaterials: MeshStandardMaterial[] = [];
     const practicalMaterials: MeshStandardMaterial[] = [];
     model.traverse((object) => {
@@ -1401,10 +1402,12 @@ function CinematicCamera({ mode, parallax }: { mode: SceneMode; parallax: boolea
 
 function ExteriorLightRig({
   curtain,
+  economy,
   mode,
   tier,
 }: {
   curtain: number;
+  economy: boolean;
   mode: SceneMode;
   tier: AssetTier;
 }) {
@@ -1521,12 +1524,14 @@ function ExteriorLightRig({
         position={[2.08, 1.86, -5.55]}
         width={4.2}
       />
-      <AreaLight
-        intensity={2.2 * profile.practical}
-        position={[7.62, 2.86, -5.05]}
-        temperature={3842}
-        width={3.2}
-      />
+      {!economy ? (
+        <AreaLight
+          intensity={2.2 * profile.practical}
+          position={[7.62, 2.86, -5.05]}
+          temperature={3842}
+          width={3.2}
+        />
+      ) : null}
       <pointLight
         ref={practicalPoint}
         color="#ffd4aa"
@@ -1549,11 +1554,13 @@ function ExteriorLightRig({
 
 function Scene({
   curtain,
+  economy,
   mode,
   parallax,
   tier,
 }: {
   curtain: number;
+  economy: boolean;
   mode: SceneMode;
   parallax: boolean;
   tier: AssetTier;
@@ -1562,7 +1569,7 @@ function Scene({
     <>
       <SceneBackdrop mode={mode} />
       <SceneEnvironment curtain={curtain} mode={mode} />
-      <ExteriorLightRig curtain={curtain} mode={mode} tier={tier} />
+      <ExteriorLightRig curtain={curtain} economy={economy} mode={mode} tier={tier} />
       <ExteriorEnvironment curtain={curtain} mode={mode} tier={tier} />
       <Apartment mode={mode} tier={tier} />
       <CurtainSystem curtain={curtain} mode={mode} tier={tier} />
@@ -1573,6 +1580,44 @@ function Scene({
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
     </>
   );
+}
+
+function MobileFrameClock({ onSample }: { onSample: (fps: number) => void }) {
+  const invalidate = useThree((state) => state.invalidate);
+  const frames = useRef(0);
+  const sampledAt = useRef(0);
+
+  useEffect(() => {
+    let animationFrame = 0;
+    let lastRequestedAt = 0;
+    const tick = (now: number) => {
+      if (now - lastRequestedAt >= 1000 / 30) {
+        invalidate();
+        lastRequestedAt = now;
+      }
+      animationFrame = window.requestAnimationFrame(tick);
+    };
+    animationFrame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [invalidate]);
+
+  useFrame(() => {
+    const now = performance.now();
+    if (sampledAt.current === 0) sampledAt.current = now;
+    frames.current += 1;
+    const elapsed = now - sampledAt.current;
+    if (elapsed > 5000) {
+      frames.current = 0;
+      sampledAt.current = now;
+      return;
+    }
+    if (elapsed < 3000) return;
+    onSample((frames.current * 1000) / elapsed);
+    frames.current = 0;
+    sampledAt.current = now;
+  });
+
+  return null;
 }
 
 function LoadStatus() {
@@ -1631,7 +1676,10 @@ export function HotelExperience() {
   const [hasExplored, setHasExplored] = useState(false);
   const [mobileCurtainOpen, setMobileCurtainOpen] = useState(false);
   const [showRotateHint, setShowRotateHint] = useState(true);
+  const [mobileDpr, setMobileDpr] = useState(0.82);
+  const [economyMode, setEconomyMode] = useState(false);
   const demoTimers = useRef<number[]>([]);
+  const steadyWindows = useRef(0);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
   const stopDemo = () => {
     demoTimers.current.forEach((timer) => window.clearTimeout(timer));
@@ -1654,6 +1702,22 @@ export function HotelExperience() {
     setHasExplored(true);
     setShowRotateHint(false);
   };
+  const adaptMobileResolution = useCallback((fps: number) => {
+    if (fps < 24) {
+      steadyWindows.current = 0;
+      setEconomyMode(true);
+      setMobileDpr((current) => Math.max(0.58, Math.round((current - 0.12) * 100) / 100));
+      return;
+    }
+    if (fps < 29) {
+      steadyWindows.current = 0;
+      return;
+    }
+    steadyWindows.current += 1;
+    if (steadyWindows.current < 3) return;
+    steadyWindows.current = 0;
+    setMobileDpr((current) => Math.min(1, Math.round((current + 0.06) * 100) / 100));
+  }, []);
   const changeCurtain = (value: number) => {
     stopDemo();
     setCurtain(value);
@@ -1816,7 +1880,8 @@ export function HotelExperience() {
               far: 60,
               position: WEB_CAMERA.position,
             }}
-            dpr={tier === "mobile" ? [0.72, 1.05] : [1, 1.55]}
+            dpr={tier === "mobile" ? mobileDpr : [1, 1.55]}
+            frameloop={tier === "mobile" ? "demand" : "always"}
             gl={{ antialias: tier === "premium", powerPreference: "high-performance" }}
             performance={{ min: 0.55 }}
             shadows={tier === "premium"}
@@ -1827,7 +1892,14 @@ export function HotelExperience() {
             }}
           >
             <Suspense fallback={null}>
-              <Scene curtain={curtain} mode={mode} parallax={parallax} tier={tier} />
+              <Scene
+                curtain={curtain}
+                economy={tier === "mobile" && economyMode}
+                mode={mode}
+                parallax={parallax}
+                tier={tier}
+              />
+              {tier === "mobile" ? <MobileFrameClock onSample={adaptMobileResolution} /> : null}
             </Suspense>
           </Canvas>
         ) : null}
