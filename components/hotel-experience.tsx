@@ -31,21 +31,24 @@ import {
   ACESFilmicToneMapping,
   AdditiveBlending,
   BufferGeometry,
+  ClampToEdgeWrapping,
   Color,
+  DataTexture,
   DirectionalLight,
   DoubleSide,
   Float32BufferAttribute,
   Group,
   HemisphereLight,
+  LinearFilter,
   MathUtils,
   Mesh,
   MeshStandardMaterial,
   PMREMGenerator,
   PointLight,
   Points as ThreePoints,
-  PointsMaterial,
   RectAreaLight,
   RepeatWrapping,
+  RGBAFormat,
   SRGBColorSpace,
   ShaderMaterial,
   Vector2,
@@ -62,7 +65,7 @@ import { Slider } from "@/components/ui/slider";
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
 
-const SCENE_ASSET_REVISION = "2026-09-12-reality-pass";
+const SCENE_ASSET_REVISION = "2026-09-13-living-scene";
 const CURTAIN_PANEL_X = 2.63;
 const CURTAIN_RAIL_X = 2.66;
 
@@ -173,11 +176,11 @@ const modeProfile: Record<
   },
   night: {
     background: "#070808",
-    environment: 0.12,
-    exposure: 1.08,
+    environment: 0.16,
+    exposure: 1.13,
     key: 0.1,
-    practical: 0.22,
-    emissive: 0.2,
+    practical: 0.34,
+    emissive: 0.28,
     bloom: 0.58,
     glare: 0,
     warmth: "#d98c56",
@@ -199,6 +202,33 @@ function getWindowLight(curtain: number) {
   const sky = MathUtils.smoothstep(open, 0, 1);
   const sun = Math.pow(MathUtils.smoothstep(open, 0.08, 1), 1.45);
   return { open, sky, sun };
+}
+
+function getCloudTransmission(time: number) {
+  const broad = 0.5 + 0.5 * Math.sin(time * 0.19 - 0.9);
+  const detail = 0.5 + 0.5 * Math.sin(time * 0.31 + 1.4);
+  return 0.82 + 0.18 * (broad * 0.72 + detail * 0.28);
+}
+
+// A conservative skyline traced from the existing valley panorama. Keeping
+// stars above this line prevents them from drifting across mountains.
+const skylineAnchors: Array<[number, number]> = [
+  [0, 0.76], [0.06, 0.76], [0.12, 0.75], [0.18, 0.735],
+  [0.24, 0.73], [0.3, 0.71], [0.36, 0.705], [0.42, 0.72],
+  [0.48, 0.715], [0.54, 0.705], [0.6, 0.695], [0.66, 0.69],
+  [0.72, 0.705], [0.78, 0.705], [0.84, 0.71], [0.9, 0.7],
+  [0.96, 0.71], [1, 0.715],
+];
+
+function getSkyline(x: number) {
+  const clamped = MathUtils.clamp(x, 0, 1);
+  for (let index = 1; index < skylineAnchors.length; index += 1) {
+    const [rightX, rightY] = skylineAnchors[index];
+    if (clamped > rightX) continue;
+    const [leftX, leftY] = skylineAnchors[index - 1];
+    return MathUtils.lerp(leftY, rightY, (clamped - leftX) / (rightX - leftX));
+  }
+  return skylineAnchors[skylineAnchors.length - 1][1];
 }
 
 const practicalMaterialNames = new Set([
@@ -423,16 +453,20 @@ const landscapeVertexShader = `
 const landscapeFragmentShader = `
   varying vec2 vUv;
   uniform sampler2D uLandscape;
+  uniform sampler2D uSkyline;
   uniform vec3 uWeights;
   uniform vec3 uTint;
   uniform vec2 uParallax;
   uniform float uBrightness;
+  uniform float uTime;
 
   void main() {
     float nearField = 1.0 - smoothstep(0.12, 0.88, vUv.y);
     vec2 sampleUv = clamp(vUv + uParallax * nearField, vec2(0.002), vec2(0.998));
     vec3 source = texture2D(uLandscape, sampleUv).rgb;
     float luminance = dot(source, vec3(0.2126, 0.7152, 0.0722));
+    float skyline = texture2D(uSkyline, vec2(sampleUv.x, 0.5)).r;
+    float skyMask = smoothstep(skyline - 0.012, skyline + 0.025, sampleUv.y);
 
     // Every time of day is graded from the same pixels so mountains and
     // buildings never morph between independently generated images.
@@ -443,14 +477,18 @@ const landscapeFragmentShader = `
     evening = mix(evening, evening * evening, 0.08);
 
     vec3 night = pow(max(source, vec3(0.0)), vec3(1.18)) * vec3(0.055, 0.095, 0.17);
-    float skyMask = smoothstep(0.57, 0.76, vUv.y);
-    vec3 nightSky = mix(vec3(0.008, 0.018, 0.045), vec3(0.025, 0.065, 0.13), vUv.y);
-    night = mix(night, nightSky + source * 0.025, skyMask * 0.86);
+    float skyHeight = clamp((sampleUv.y - skyline) / max(1.0 - skyline, 0.12), 0.0, 1.0);
+    vec3 nightSky = mix(vec3(0.028, 0.055, 0.104), vec3(0.005, 0.013, 0.036), skyHeight);
+    night = mix(night, nightSky + source * 0.012, skyMask * 0.94);
     float cityBand = smoothstep(0.1, 0.22, vUv.y) * (1.0 - smoothstep(0.47, 0.58, vUv.y));
     float cityLights = smoothstep(0.74, 0.96, luminance) * cityBand;
     night += vec3(1.0, 0.48, 0.16) * cityLights * 1.65;
 
     vec3 landscape = morning * uWeights.x + evening * uWeights.y + night * uWeights.z;
+    float cloudField = sin(sampleUv.x * 11.0 - uTime * 0.12) *
+      sin(sampleUv.y * 4.8 + sampleUv.x * 2.1 - uTime * 0.025);
+    float cloudShadow = smoothstep(-0.1, 0.82, cloudField);
+    landscape *= 1.0 - (uWeights.x + uWeights.y) * (1.0 - skyMask) * cloudShadow * 0.13;
     gl_FragColor = vec4(landscape * uTint * uBrightness, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -483,6 +521,23 @@ function ExteriorEnvironment({
     },
     [sourceTexture, tier],
   );
+  const skylineTexture = useMemo(() => {
+    const width = 128;
+    const data = new Uint8Array(width * 4);
+    for (let index = 0; index < width; index += 1) {
+      const value = Math.round(getSkyline(index / (width - 1)) * 255);
+      data[index * 4] = value;
+      data[index * 4 + 1] = value;
+      data[index * 4 + 2] = value;
+      data[index * 4 + 3] = 255;
+    }
+    const texture = new DataTexture(data, width, 1, RGBAFormat);
+    texture.magFilter = LinearFilter;
+    texture.minFilter = LinearFilter;
+    texture.wrapS = ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+    return texture;
+  }, []);
   const targetWeights = useMemo(
     () => new Vector3(...profile.landscapeMix),
     [profile.landscapeMix],
@@ -501,17 +556,19 @@ function ExteriorEnvironment({
       uniforms: {
         uBrightness: { value: 1 },
         uLandscape: { value: landscapeTexture },
+        uSkyline: { value: skylineTexture },
         uParallax: { value: new Vector2() },
         uTint: { value: animatedTint.current.clone() },
+        uTime: { value: 0 },
         uWeights: { value: animatedWeights.current.clone() },
       },
       vertexShader: landscapeVertexShader,
     }),
-    [landscapeTexture],
+    [landscapeTexture, skylineTexture],
   );
 
   // The landscape material is intentionally animated by the render loop.
-  useFrame(({ camera }, delta) => {
+  useFrame(({ camera, clock }, delta) => {
     animatedOpen.current = MathUtils.damp(
       animatedOpen.current,
       getWindowLight(curtain).open,
@@ -530,14 +587,16 @@ function ExteriorEnvironment({
     landscapeMaterial.uniforms.uParallax.value.copy(animatedParallax.current);
     landscapeMaterial.uniforms.uTint.value.copy(animatedTint.current);
     landscapeMaterial.uniforms.uWeights.value.copy(animatedWeights.current);
+    landscapeMaterial.uniforms.uTime.value = clock.elapsedTime;
   });
 
   useEffect(
     () => () => {
       landscapeTexture.dispose();
+      skylineTexture.dispose();
       landscapeMaterial.dispose();
     },
-    [landscapeMaterial, landscapeTexture],
+    [landscapeMaterial, landscapeTexture, skylineTexture],
   );
 
   return (
@@ -697,9 +756,15 @@ function CurtainPanel({
     mesh.current.morphTargetInfluences[0] = state.value;
     const phase = side === "near" ? 0 : 0.72;
     const motionTime = clock.elapsedTime * (side === "near" ? 3.25 : 2.8) + phase;
-    mesh.current.morphTargetInfluences[1] = Math.sin(motionTime) * state.waveEnergy * 0.82;
-    mesh.current.morphTargetInfluences[2] = Math.cos(motionTime * 0.87) * state.waveEnergy * 0.58;
-    mesh.current.rotation.x = Math.sin(motionTime * 0.72) * state.waveEnergy * 0.018;
+    const idlePhase = clock.elapsedTime * (side === "near" ? 0.82 : 0.69) + phase;
+    const idleEnergy = (mode === "night" ? 0.06 : 0.08) * (0.65 + state.value * 0.35);
+    mesh.current.morphTargetInfluences[1] =
+      Math.sin(motionTime) * state.waveEnergy * 0.82 + Math.sin(idlePhase) * idleEnergy;
+    mesh.current.morphTargetInfluences[2] =
+      Math.cos(motionTime * 0.87) * state.waveEnergy * 0.58 +
+      Math.cos(idlePhase * 0.81) * idleEnergy * 0.65;
+    mesh.current.rotation.x =
+      Math.sin(motionTime * 0.72) * state.waveEnergy * 0.018 + Math.sin(idlePhase) * 0.0015;
     mesh.current.rotation.z = Math.cos(motionTime * 0.61) * state.waveEnergy * 0.007;
   });
 
@@ -818,7 +883,7 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
 
   // Shader uniforms are intentionally mutated by the render loop.
   // eslint-disable-next-line react-hooks/immutability
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     animatedOpen.current = MathUtils.damp(
       animatedOpen.current,
       getWindowLight(curtain).open,
@@ -835,11 +900,14 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
     floorMaterial.uniforms.uColor.value.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
     windowMaterial.uniforms.uColor.value.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
     // eslint-disable-next-line react-hooks/immutability
-    floorMaterial.uniforms.uOpacity.value = sun * animatedGlare.current * 0.2;
+    const cloudLight = getCloudTransmission(clock.elapsedTime);
+    floorMaterial.uniforms.uOpacity.value = sun * animatedGlare.current * cloudLight * 0.2;
     // eslint-disable-next-line react-hooks/immutability
-    windowMaterial.uniforms.uOpacity.value = sun * animatedGlare.current * 0.12;
+    windowMaterial.uniforms.uOpacity.value = sun * animatedGlare.current * cloudLight * 0.12;
     if (floorPatch.current) {
       floorPatch.current.scale.y = MathUtils.lerp(0.12, 1, sky);
+      floorPatch.current.position.x = 5.15 + Math.sin(clock.elapsedTime * 0.14) * 0.075;
+      floorPatch.current.position.z = -5.55 + Math.cos(clock.elapsedTime * 0.11) * 0.08;
     }
     if (windowGlow.current) {
       windowGlow.current.scale.x = MathUtils.lerp(0.1, 1, sky);
@@ -879,10 +947,11 @@ function SunGlare({ curtain, mode, tier }: { curtain: number; mode: SceneMode; t
 }
 
 function createDustGeometry(tier: AssetTier) {
-  const count = tier === "premium" ? 78 : 24;
+  const count = tier === "premium" ? 92 : 34;
   const positions = new Float32Array(count * 3);
   const phases = new Float32Array(count);
   const sizes = new Float32Array(count);
+  const brightness = new Float32Array(count);
   let seed = 1847;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
@@ -891,18 +960,20 @@ function createDustGeometry(tier: AssetTier) {
 
   for (let index = 0; index < count; index += 1) {
     const along = random();
-    const spread = 0.2 + along * 0.52;
+    const spread = 0.65 + along * 1.55;
     positions[index * 3] = -1.7 + along * 3.5;
     positions[index * 3 + 1] = (random() - 0.5) * 1.35;
     positions[index * 3 + 2] = (random() - 0.5) * spread * 2;
     phases[index] = random() * Math.PI * 2;
-    sizes[index] = MathUtils.lerp(1.35, tier === "premium" ? 3.8 : 3.1, random());
+    sizes[index] = 2.2 + Math.pow(random(), 2) * (tier === "premium" ? 4.4 : 3.2);
+    brightness[index] = 0.45 + random() * 0.55;
   }
 
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
   geometry.setAttribute("aPhase", new Float32BufferAttribute(phases, 1));
   geometry.setAttribute("aSize", new Float32BufferAttribute(sizes, 1));
+  geometry.setAttribute("aBrightness", new Float32BufferAttribute(brightness, 1));
   geometry.computeBoundingSphere();
   return geometry;
 }
@@ -910,20 +981,21 @@ function createDustGeometry(tier: AssetTier) {
 const dustVertexShader = `
   attribute float aPhase;
   attribute float aSize;
+  attribute float aBrightness;
   uniform float uPixelRatio;
   uniform float uTime;
   varying float vShimmer;
 
   void main() {
     vec3 transformed = position;
-    transformed.y += sin(uTime * 0.31 + aPhase) * 0.035;
-    transformed.x += cos(uTime * 0.19 + aPhase * 1.7) * 0.022;
-    transformed.z += sin(uTime * 0.23 + aPhase * 0.73) * 0.018;
+    transformed.y += sin(uTime * 0.31 + aPhase) * 0.065;
+    transformed.x += cos(uTime * 0.19 + aPhase * 1.7) * 0.045;
+    transformed.z += sin(uTime * 0.23 + aPhase * 0.73) * 0.035;
     vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
     float perspective = clamp(3.4 / max(-mvPosition.z, 0.35), 0.58, 1.7);
     gl_PointSize = aSize * uPixelRatio * perspective;
     gl_Position = projectionMatrix * mvPosition;
-    vShimmer = 0.72 + sin(uTime * 0.67 + aPhase * 2.1) * 0.18;
+    vShimmer = aBrightness * (0.8 + sin(uTime * 0.67 + aPhase * 2.1) * 0.2);
   }
 `;
 
@@ -936,8 +1008,8 @@ const dustFragmentShader = `
     vec2 point = gl_PointCoord - 0.5;
     float radius = length(point);
     if (radius > 0.5) discard;
-    float softDisc = smoothstep(0.5, 0.08, radius);
-    float core = exp(-radius * radius * 14.0);
+    float softDisc = 1.0 - smoothstep(0.1, 0.5, radius);
+    float core = exp(-radius * radius * 8.0);
     float alpha = softDisc * core * uOpacity * vShimmer;
     gl_FragColor = vec4(uColor, alpha);
   }
@@ -949,7 +1021,8 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
   const geometry = useMemo(() => createDustGeometry(tier), [tier]);
   const points = useRef<ThreePoints>(null);
   const animatedOpen = useRef(getWindowLight(curtain).open);
-  const animatedGlare = useRef(profile.glare);
+  const dustVisibility = mode === "morning" ? 0.72 : mode === "evening" ? 0.8 : mode === "cinema" ? 0.08 : 0;
+  const animatedVisibility = useRef(dustVisibility);
   const targetWarmth = useMemo(() => new Color(profile.warmth), [profile.warmth]);
   const material = useMemo(
     () => new ShaderMaterial({
@@ -986,15 +1059,16 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
       delta,
     );
     const { sun } = getWindowLight(animatedOpen.current * 100);
-    animatedGlare.current = MathUtils.damp(
-      animatedGlare.current,
-      profile.glare,
+    animatedVisibility.current = MathUtils.damp(
+      animatedVisibility.current,
+      dustVisibility,
       1.35,
       delta,
     );
     material.uniforms.uColor.value.lerp(targetWarmth, 1 - Math.exp(-delta * 1.35));
     material.uniforms.uOpacity.value =
-      sun * animatedGlare.current * (tier === "premium" ? 0.3 : 0.16);
+      sun * animatedVisibility.current * getCloudTransmission(clock.elapsedTime) *
+      (tier === "premium" ? 0.88 : 0.72);
     material.uniforms.uTime.value = clock.elapsedTime;
     material.uniforms.uPixelRatio.value = Math.min(gl.getPixelRatio(), 2);
     if (points.current) {
@@ -1015,8 +1089,11 @@ function DustMotes({ curtain, mode, tier }: { curtain: number; mode: SceneMode; 
 }
 
 function createStarGeometry(tier: AssetTier) {
-  const count = tier === "premium" ? 64 : 28;
+  const count = tier === "premium" ? 120 : 52;
   const positions = new Float32Array(count * 3);
+  const phases = new Float32Array(count);
+  const sizes = new Float32Array(count);
+  const brightness = new Float32Array(count);
   let seed = 7919;
   const random = () => {
     seed = (seed * 48271) % 2147483647;
@@ -1024,48 +1101,87 @@ function createStarGeometry(tier: AssetTier) {
   };
 
   for (let index = 0; index < count; index += 1) {
-    positions[index * 3] = -7.45 + random() * 0.12;
-    positions[index * 3 + 1] = 2.55 + random() * 3.2;
-    positions[index * 3 + 2] = -2.8 - random() * 6.2;
+    const u = 0.025 + random() * 0.95;
+    const minimumSky = getSkyline(u) + 0.04;
+    const v = MathUtils.lerp(minimumSky, 0.985, random());
+    positions[index * 3] = -7.955;
+    positions[index * 3 + 1] = 1.72 + (v - 0.5) * 8.5;
+    positions[index * 3 + 2] = -10.95 - (u - 0.5) * 22;
+    phases[index] = random() * Math.PI * 2;
+    sizes[index] = 1.65 + Math.pow(random(), 2) * 2.15;
+    brightness[index] = 0.45 + random() * 0.55;
   }
 
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("aPhase", new Float32BufferAttribute(phases, 1));
+  geometry.setAttribute("aSize", new Float32BufferAttribute(sizes, 1));
+  geometry.setAttribute("aBrightness", new Float32BufferAttribute(brightness, 1));
   geometry.computeBoundingSphere();
   return geometry;
 }
 
-function NightStars({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
-  const geometry = useMemo(() => createStarGeometry(tier), [tier]);
-  const material = useRef<PointsMaterial>(null);
-  const visibility = useRef(mode === "night" ? 1 : mode === "cinema" ? 0.35 : 0);
+const starVertexShader = `
+  attribute float aPhase;
+  attribute float aSize;
+  attribute float aBrightness;
+  uniform float uPixelRatio;
+  uniform float uTime;
+  varying float vBrightness;
 
-  useEffect(() => () => geometry.dispose(), [geometry]);
+  void main() {
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = aSize * uPixelRatio;
+    vBrightness = aBrightness * (0.86 + 0.14 * sin(uTime * 0.83 + aPhase));
+  }
+`;
+
+const starFragmentShader = `
+  uniform float uOpacity;
+  varying float vBrightness;
+
+  void main() {
+    float radius = length(gl_PointCoord - 0.5);
+    if (radius > 0.5) discard;
+    float glow = exp(-radius * radius * 17.0);
+    float core = 1.0 - smoothstep(0.08, 0.28, radius);
+    gl_FragColor = vec4(vec3(0.78, 0.87, 1.0), (glow * 0.55 + core * 0.45) * vBrightness * uOpacity);
+  }
+`;
+
+function NightStars({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
+  const { gl } = useThree();
+  const geometry = useMemo(() => createStarGeometry(tier), [tier]);
+  const material = useMemo(() => new ShaderMaterial({
+    blending: AdditiveBlending,
+    depthTest: true,
+    depthWrite: false,
+    fragmentShader: starFragmentShader,
+    toneMapped: false,
+    transparent: true,
+    uniforms: {
+      uOpacity: { value: 0 },
+      uPixelRatio: { value: Math.min(gl.getPixelRatio(), 1.5) },
+      uTime: { value: 0 },
+    },
+    vertexShader: starVertexShader,
+  }), [gl]);
+  const visibility = useRef(mode === "night" ? 1 : mode === "cinema" ? 0.15 : 0);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
 
   useFrame(({ clock }, delta) => {
-    const target = mode === "night" ? 1 : mode === "cinema" ? 0.35 : 0;
+    const target = mode === "night" ? 1 : mode === "cinema" ? 0.15 : 0;
     visibility.current = MathUtils.damp(visibility.current, target, 1.2, delta);
-    if (material.current) {
-      const twinkle = 0.72 + Math.sin(clock.elapsedTime * 1.7) * 0.06;
-      material.current.opacity = visibility.current * twinkle;
-    }
+    material.uniforms.uOpacity.value = visibility.current;
+    material.uniforms.uTime.value = clock.elapsedTime;
+    material.uniforms.uPixelRatio.value = Math.min(gl.getPixelRatio(), 1.5);
   });
 
-  return (
-    <points geometry={geometry}>
-      <pointsMaterial
-        ref={material}
-        blending={AdditiveBlending}
-        color="#dceaff"
-        depthWrite={false}
-        opacity={0}
-        size={tier === "premium" ? 0.032 : 0.042}
-        sizeAttenuation
-        toneMapped={false}
-        transparent
-      />
-    </points>
-  );
+  return <points geometry={geometry} material={material} />;
 }
 
 function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
@@ -1302,6 +1418,7 @@ function ExteriorLightRig({
   const skyLight = useRef<HemisphereLight>(null);
   const portalLight = useRef<RectAreaLight>(null);
   const practicalPoint = useRef<PointLight>(null);
+  const bedsidePoint = useRef<PointLight>(null);
   const animatedOpen = useRef(getWindowLight(curtain).open);
   const animatedProfile = useRef({ key: profile.key, practical: profile.practical });
   const initialLight = getWindowLight(curtain);
@@ -1327,7 +1444,7 @@ function ExteriorLightRig({
     portalLight.current?.lookAt(6.4, 1.45, -5.75);
   }, []);
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     animatedOpen.current = MathUtils.damp(
       animatedOpen.current,
       getWindowLight(curtain).open,
@@ -1335,6 +1452,7 @@ function ExteriorLightRig({
       delta,
     );
     const { sky, sun } = getWindowLight(animatedOpen.current * 100);
+    const cloudLight = getCloudTransmission(clock.elapsedTime);
     animatedProfile.current.key = MathUtils.damp(
       animatedProfile.current.key,
       profile.key,
@@ -1354,16 +1472,25 @@ function ExteriorLightRig({
     }
     if (sunLight.current) {
       sunLight.current.intensity =
-        animatedProfile.current.key * sun * (mode === "morning" ? 1.12 : 1.02);
+        animatedProfile.current.key * sun * cloudLight * (mode === "morning" ? 1.12 : 1.02);
       sunLight.current.color.lerp(sunColor, atmosphereEase);
       sunLight.current.position.lerp(sceneSunPositions[mode], atmosphereEase);
     }
     if (portalLight.current) {
-      portalLight.current.intensity = animatedProfile.current.key * (0.04 + sky * 2.65);
+      portalLight.current.intensity =
+        animatedProfile.current.key * (0.04 + sky * 2.65 * cloudLight);
       portalLight.current.color.lerp(portalColor, atmosphereEase);
     }
     if (practicalPoint.current) {
       practicalPoint.current.intensity = 2.8 * animatedProfile.current.practical;
+    }
+    if (bedsidePoint.current) {
+      bedsidePoint.current.intensity = MathUtils.damp(
+        bedsidePoint.current.intensity,
+        mode === "night" ? 1.6 : mode === "cinema" ? 0.18 : 0,
+        1.4,
+        delta,
+      );
     }
   });
 
@@ -1412,6 +1539,14 @@ function ExteriorLightRig({
         distance={4.5}
         intensity={2.8 * modeProfile.evening.practical}
         position={[7.9, 2.28, -8.35]}
+      />
+      <pointLight
+        ref={bedsidePoint}
+        color="#ffc594"
+        decay={2}
+        distance={3.1}
+        intensity={mode === "night" ? 1.6 : 0}
+        position={[6.72, 1.74, -6.66]}
       />
     </>
   );
@@ -1506,12 +1641,43 @@ export function HotelExperience() {
   const [curtain, setCurtain] = useState(84);
   const [listening, setListening] = useState(false);
   const [parallax, setParallax] = useState(true);
+  const [demoPlaying, setDemoPlaying] = useState(false);
+  const demoTimers = useRef<number[]>([]);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
   const activeMode = sceneModes.find((item) => item.id === mode) ?? sceneModes[1];
-  const activateMode = (nextMode: SceneMode) => {
+  const stopDemo = () => {
+    demoTimers.current.forEach((timer) => window.clearTimeout(timer));
+    demoTimers.current = [];
+    setDemoPlaying(false);
+  };
+  const applyMode = (nextMode: SceneMode) => {
     setMode(nextMode);
     setCurtain(modeCurtainPresets[nextMode]);
   };
+  const activateMode = (nextMode: SceneMode) => {
+    stopDemo();
+    applyMode(nextMode);
+  };
+  const toggleDemo = () => {
+    if (demoPlaying) {
+      stopDemo();
+      return;
+    }
+    stopDemo();
+    setDemoPlaying(true);
+    applyMode("morning");
+    demoTimers.current = [
+      window.setTimeout(() => applyMode("evening"), 6500),
+      window.setTimeout(() => applyMode("night"), 13500),
+      window.setTimeout(() => applyMode("evening"), 20500),
+      window.setTimeout(() => {
+        demoTimers.current = [];
+        setDemoPlaying(false);
+      }, 26000),
+    ];
+  };
+
+  useEffect(() => () => demoTimers.current.forEach((timer) => window.clearTimeout(timer)), []);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -1590,6 +1756,7 @@ export function HotelExperience() {
 
         const configured = { ...experienceState.current, ...next } as ExperienceState;
         experienceState.current = configured;
+        stopDemo();
         if (next.mode !== undefined) setMode(next.mode);
         if (next.curtain !== undefined) setCurtain(next.curtain);
         if (next.parallax !== undefined) setParallax(next.parallax);
@@ -1672,8 +1839,8 @@ export function HotelExperience() {
           <button type="button" className="icon-button" aria-label="Поиск">
             <Search aria-hidden="true" />
           </button>
-          <button type="button" className="demo-button" onClick={() => activateMode("evening")}>
-            Запустить демо <ArrowRight aria-hidden="true" />
+          <button type="button" className="demo-button" onClick={toggleDemo}>
+            {demoPlaying ? "Остановить демо" : "Запустить демо"} <ArrowRight aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -1691,11 +1858,14 @@ export function HotelExperience() {
         </p>
       </section>
 
-      <div className="weather" aria-label="Белокуриха, Алтай, плюс 18 градусов">
-        <CloudSun aria-hidden="true" />
+      <div
+        className="weather"
+        aria-label={mode === "night" ? "Белокуриха, Алтай, ночной сценарий" : "Белокуриха, Алтай, плюс 18 градусов"}
+      >
+        {mode === "night" ? <Moon aria-hidden="true" /> : <CloudSun aria-hidden="true" />}
         <span>
           <small>Белокуриха, Алтай</small>
-          <strong>+18°</strong>
+          <strong>{mode === "night" ? "Ночь" : "+18°"}</strong>
         </span>
       </div>
 
@@ -1721,7 +1891,10 @@ export function HotelExperience() {
             max={100}
             step={1}
             value={[curtain]}
-            onValueChange={(value) => setCurtain(value[0] ?? 84)}
+            onValueChange={(value) => {
+              stopDemo();
+              setCurtain(value[0] ?? 84);
+            }}
           />
         </div>
 
