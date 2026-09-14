@@ -1591,7 +1591,8 @@ function MobileFrameClock({ onSample }: { onSample: (fps: number) => void }) {
     let animationFrame = 0;
     let lastRequestedAt = 0;
     const tick = (now: number) => {
-      if (now - lastRequestedAt >= 1000 / 30) {
+      // Leave a little room for rAF timestamp jitter on 60/90/120 Hz screens.
+      if (now - lastRequestedAt >= 1000 / 32) {
         invalidate();
         lastRequestedAt = now;
       }
