@@ -1212,7 +1212,7 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const url =
     tier === "premium"
       ? `/models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`
-      : `/models/AAELS-mobile.glb?rev=${SCENE_ASSET_REVISION}`;
+      : `/models/AAELS-mobile-visible.glb?rev=${SCENE_ASSET_REVISION}`;
   const gltf = useGLTF(url);
   const model = useMemo(() => gltf.scene.clone(true) as Group, [gltf.scene]);
   const floorGeometry = useMemo(() => {
@@ -1677,7 +1677,7 @@ export function HotelExperience() {
   const [hasExplored, setHasExplored] = useState(false);
   const [mobileCurtainOpen, setMobileCurtainOpen] = useState(false);
   const [showRotateHint, setShowRotateHint] = useState(true);
-  const [mobileDpr, setMobileDpr] = useState(0.82);
+  const [mobileDpr, setMobileDpr] = useState(1.05);
   const [economyMode, setEconomyMode] = useState(false);
   const demoTimers = useRef<number[]>([]);
   const steadyWindows = useRef(0);
@@ -1707,7 +1707,7 @@ export function HotelExperience() {
     if (fps < 24) {
       steadyWindows.current = 0;
       setEconomyMode(true);
-      setMobileDpr((current) => Math.max(0.58, Math.round((current - 0.12) * 100) / 100));
+      setMobileDpr((current) => Math.max(0.95, Math.round((current - 0.08) * 100) / 100));
       return;
     }
     if (fps < 29) {
@@ -1717,7 +1717,7 @@ export function HotelExperience() {
     steadyWindows.current += 1;
     if (steadyWindows.current < 3) return;
     steadyWindows.current = 0;
-    setMobileDpr((current) => Math.min(1, Math.round((current + 0.06) * 100) / 100));
+    setMobileDpr((current) => Math.min(1.2, Math.round((current + 0.05) * 100) / 100));
   }, []);
   const changeCurtain = (value: number) => {
     stopDemo();
