@@ -5,9 +5,10 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   ArrowRight,
   ChevronRight,
+  Maximize2,
+  Minimize2,
   Moon,
   Play,
-  RotateCw,
   SlidersHorizontal,
   Sparkles,
   SunMedium,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 import {
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   Suspense,
   useCallback,
   useEffect,
@@ -39,6 +41,7 @@ import {
   MathUtils,
   Mesh,
   MeshStandardMaterial,
+  PerspectiveCamera,
   PMREMGenerator,
   PointLight,
   Points as ThreePoints,
@@ -1212,7 +1215,7 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const url =
     tier === "premium"
       ? `/models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`
-      : `/models/AAELS-mobile-visible.glb?rev=${SCENE_ASSET_REVISION}`;
+      : `/models/AAELS-mobile-balanced.glb?rev=${SCENE_ASSET_REVISION}`;
   const gltf = useGLTF(url);
   const model = useMemo(() => gltf.scene.clone(true) as Group, [gltf.scene]);
   const floorGeometry = useMemo(() => {
@@ -1278,7 +1281,11 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
 
       const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const cloned = source.map((material) => {
-        const next = material.clone() as MeshStandardMaterial;
+        // The mobile scene keeps the PBR maps but skips the costly physical
+        // clearcoat/specular/sheen shader branches from the premium export.
+        const next = tier === "mobile" && material.type === "MeshPhysicalMaterial"
+          ? new MeshStandardMaterial().copy(material as MeshStandardMaterial)
+          : material.clone() as MeshStandardMaterial;
         if (next.map) next.map.anisotropy = anisotropy;
         if (next.normalMap) next.normalMap.anisotropy = anisotropy;
         const name = next.name.toLowerCase();
@@ -1371,12 +1378,33 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   );
 }
 
-function CinematicCamera({ mode, parallax }: { mode: SceneMode; parallax: boolean }) {
-  const { camera, pointer } = useThree();
+function CinematicCamera({
+  mode,
+  parallax,
+  tier,
+  viewAngles,
+}: {
+  mode: SceneMode;
+  parallax: boolean;
+  tier: AssetTier;
+  viewAngles: { current: { yaw: number; pitch: number } };
+}) {
+  const { camera, pointer, size } = useThree();
   const lookTarget = useRef(sceneShots[mode].target.clone());
   const desired = useMemo(() => new Vector3(), []);
   const desiredTarget = useMemo(() => new Vector3(), []);
   const offset = useMemo(() => new Vector3(), []);
+  const direction = useMemo(() => new Vector3(), []);
+  const up = useMemo(() => new Vector3(0, 1, 0), []);
+
+  useEffect(() => {
+    const perspective = camera as PerspectiveCamera;
+    if (!perspective.isPerspectiveCamera) return;
+    perspective.fov = tier === "mobile"
+      ? (size.width < size.height ? 68 : 58)
+      : WEB_CAMERA.verticalFov;
+    perspective.updateProjectionMatrix();
+  }, [camera, size.height, size.width, tier]);
 
   useLayoutEffect(() => {
     camera.position.copy(sceneShots.evening.position);
@@ -1386,6 +1414,20 @@ function CinematicCamera({ mode, parallax }: { mode: SceneMode; parallax: boolea
 
   useFrame((_, delta) => {
     const shot = sceneShots[mode];
+    if (tier === "mobile") {
+      const { yaw, pitch } = viewAngles.current;
+      direction.subVectors(shot.target, shot.position);
+      const distance = direction.length();
+      direction.applyAxisAngle(up, yaw);
+      direction.y += Math.tan(pitch) * distance;
+      desired.copy(shot.position);
+      desiredTarget.copy(shot.position).add(direction);
+      const ease = 1 - Math.exp(-delta * 4.2);
+      camera.position.lerp(desired, ease);
+      lookTarget.current.lerp(desiredTarget, ease);
+      camera.lookAt(lookTarget.current);
+      return;
+    }
     const horizontal = parallax ? pointer.x * 0.18 : 0;
     const vertical = parallax ? pointer.y * 0.08 : 0;
     offset.set(0, vertical, horizontal);
@@ -1558,12 +1600,14 @@ function Scene({
   mode,
   parallax,
   tier,
+  viewAngles,
 }: {
   curtain: number;
   economy: boolean;
   mode: SceneMode;
   parallax: boolean;
   tier: AssetTier;
+  viewAngles: { current: { yaw: number; pitch: number } };
 }) {
   return (
     <>
@@ -1576,7 +1620,7 @@ function Scene({
       <SunGlare curtain={curtain} mode={mode} tier={tier} />
       <DustMotes curtain={curtain} mode={mode} tier={tier} />
       <NightStars mode={mode} tier={tier} />
-      <CinematicCamera mode={mode} parallax={parallax} />
+      <CinematicCamera mode={mode} parallax={parallax} tier={tier} viewAngles={viewAngles} />
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
     </>
   );
@@ -1676,9 +1720,12 @@ export function HotelExperience() {
   const [demoPlaying, setDemoPlaying] = useState(false);
   const [hasExplored, setHasExplored] = useState(false);
   const [mobileCurtainOpen, setMobileCurtainOpen] = useState(false);
-  const [showRotateHint, setShowRotateHint] = useState(true);
-  const [mobileDpr, setMobileDpr] = useState(1.05);
+  const [isViewing, setIsViewing] = useState(false);
+  const [showPanHint, setShowPanHint] = useState(true);
+  const [mobileDpr, setMobileDpr] = useState(0.95);
   const [economyMode, setEconomyMode] = useState(false);
+  const mobileViewAngles = useRef({ yaw: -0.12, pitch: 0 });
+  const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const demoTimers = useRef<number[]>([]);
   const steadyWindows = useRef(0);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
@@ -1695,39 +1742,35 @@ export function HotelExperience() {
     stopDemo();
     applyMode(nextMode);
     setHasExplored(true);
-    setShowRotateHint(false);
   };
   const showAliceCurtainScenario = () => {
     stopDemo();
     setCurtain((current) => current > 50 ? 0 : 100);
     setHasExplored(true);
-    setShowRotateHint(false);
   };
   const adaptMobileResolution = useCallback((fps: number) => {
-    if (fps < 24) {
+    if (fps < 27) {
       steadyWindows.current = 0;
       setEconomyMode(true);
-      setMobileDpr((current) => Math.max(0.95, Math.round((current - 0.08) * 100) / 100));
+      setMobileDpr((current) => Math.max(0.82, Math.round((current - 0.07) * 100) / 100));
       return;
     }
-    if (fps < 29) {
+    if (fps < 30) {
       steadyWindows.current = 0;
       return;
     }
     steadyWindows.current += 1;
     if (steadyWindows.current < 3) return;
     steadyWindows.current = 0;
-    setMobileDpr((current) => Math.min(1.2, Math.round((current + 0.05) * 100) / 100));
+    setMobileDpr((current) => Math.min(1.06, Math.round((current + 0.04) * 100) / 100));
   }, []);
   const changeCurtain = (value: number) => {
     stopDemo();
     setCurtain(value);
     setHasExplored(true);
-    setShowRotateHint(false);
   };
   const toggleDemo = () => {
     setHasExplored(true);
-    setShowRotateHint(false);
     if (demoPlaying) {
       stopDemo();
       return;
@@ -1758,14 +1801,40 @@ export function HotelExperience() {
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  useEffect(() => {
-    const landscape = window.matchMedia("(orientation: landscape)");
-    const dismissAfterRotation = () => {
-      if (landscape.matches) setShowRotateHint(false);
-    };
-    landscape.addEventListener("change", dismissAfterRotation);
-    return () => landscape.removeEventListener("change", dismissAfterRotation);
-  }, []);
+  const beginMobilePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (tier !== "mobile" || (event.pointerType === "mouse" && event.button !== 0)) return;
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveMobilePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = drag.current;
+    if (tier !== "mobile" || !start || start.pointerId !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    start.x = event.clientX;
+    start.y = event.clientY;
+    mobileViewAngles.current.yaw = MathUtils.clamp(
+      mobileViewAngles.current.yaw + (dx / Math.max(window.innerWidth, 320)) * 0.85,
+      -0.6,
+      0.22,
+    );
+    mobileViewAngles.current.pitch = MathUtils.clamp(
+      mobileViewAngles.current.pitch + (dy / Math.max(window.innerHeight, 320)) * 0.45,
+      -0.16,
+      0.16,
+    );
+    if (Math.abs(dx) + Math.abs(dy) > 2) {
+      if (!hasExplored) setHasExplored(true);
+      if (showPanHint) setShowPanHint(false);
+    }
+  };
+  const endMobilePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (drag.current?.pointerId !== event.pointerId) return;
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
 
   useEffect(() => {
     experienceState.current = { mode, curtain, parallax };
@@ -1871,8 +1940,15 @@ export function HotelExperience() {
   }, []);
 
   return (
-    <main className={`hotel-experience mode-${mode}${hasExplored ? " has-explored" : ""}`} id="experience">
-      <div className="scene-shell" aria-label="Интерактивное трёхмерное пространство номера">
+    <main className={`hotel-experience mode-${mode}${hasExplored ? " has-explored" : ""}${isViewing ? " is-viewing" : ""}`} id="experience">
+      <div
+        className="scene-shell"
+        aria-label="Интерактивное трёхмерное пространство номера"
+        onPointerDownCapture={beginMobilePan}
+        onPointerMoveCapture={moveMobilePan}
+        onPointerUpCapture={endMobilePan}
+        onPointerCancelCapture={endMobilePan}
+      >
         {tier ? (
           <Canvas
             camera={{
@@ -1899,6 +1975,7 @@ export function HotelExperience() {
                 mode={mode}
                 parallax={parallax}
                 tier={tier}
+                viewAngles={mobileViewAngles}
               />
               {tier === "mobile" ? <MobileFrameClock onSample={adaptMobileResolution} /> : null}
             </Suspense>
@@ -2020,13 +2097,6 @@ export function HotelExperience() {
       </aside>
 
       <div className="mobile-controls">
-        {showRotateHint && (
-          <div className="rotate-hint glass-panel">
-            <RotateCw aria-hidden="true" />
-            <span>Поверните телефон — откройте панораму</span>
-            <button type="button" onClick={() => setShowRotateHint(false)}>Смотреть вертикально</button>
-          </div>
-        )}
         {mobileCurtainOpen && (
           <div className="mobile-curtain-panel glass-panel">
             <div className="curtain-heading">
@@ -2051,7 +2121,6 @@ export function HotelExperience() {
             onClick={() => {
               setMobileCurtainOpen((open) => !open);
               setHasExplored(true);
-              setShowRotateHint(false);
             }}
           >
             <SlidersHorizontal aria-hidden="true" />
@@ -2068,7 +2137,7 @@ export function HotelExperience() {
             <span>Алиса · демо</span>
           </button>
         </div>
-        <nav className="mobile-scenarios" aria-label="Сценарии освещения">
+        <nav className="mobile-scenarios" aria-label="Сценарии освещения и обзор номера">
           {sceneModes.map((item) => (
             <button
               key={item.id}
@@ -2082,8 +2151,30 @@ export function HotelExperience() {
               <span>{item.label}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="mobile-look-trigger"
+            aria-label="Осмотреть номер без панелей"
+            onClick={() => {
+              setIsViewing(true);
+              setHasExplored(true);
+            }}
+          >
+            <Maximize2 aria-hidden="true" />
+            <span>Обзор</span>
+          </button>
         </nav>
       </div>
+
+      {isViewing ? (
+        <>
+          <button type="button" className="mobile-view-return glass-panel" onClick={() => setIsViewing(false)}>
+            <Minimize2 aria-hidden="true" />
+            Управление
+          </button>
+          {showPanHint ? <p className="mobile-pan-hint">Проведите пальцем по сцене, чтобы осмотреть номер</p> : null}
+        </>
+      ) : null}
 
       <footer className="experience-footer" id="about">
         <span>Демонстрационный концепт для Белкур</span>
