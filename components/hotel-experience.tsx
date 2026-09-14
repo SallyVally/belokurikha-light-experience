@@ -9,11 +9,11 @@ import {
   Maximize2,
   Minimize2,
   Moon,
-  Play,
   SlidersHorizontal,
   Sparkles,
   SunMedium,
   Video,
+  X,
 } from "lucide-react";
 import {
   type CSSProperties,
@@ -66,6 +66,33 @@ import { Slider } from "@/components/ui/slider";
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
 type RoomView = "bedroom" | "kitchen";
+type AssistantIntent = "wake" | "view" | "return" | "sleep" | "open" | "close" | "cinema" | "evening" | "morning" | "night";
+
+type AssistantMessage = {
+  prompt: string;
+  response: string;
+};
+
+const assistantSuggestions: Array<{ intent: AssistantIntent; prompt: string }> = [
+  { intent: "wake", prompt: "Разбуди меня мягко" },
+  { intent: "view", prompt: "Покажи вид на горы" },
+  { intent: "return", prompt: "Я вернулся в номер" },
+];
+
+function parseAssistantIntent(input: string): AssistantIntent | null {
+  const phrase = input.toLocaleLowerCase("ru-RU").replace(/ё/g, "е");
+  if (/разбуд|просып|плавн.*утр|мягк.*утр/.test(phrase)) return "wake";
+  if (/вид|панорам|гор[ыу]|кухн/.test(phrase)) return "view";
+  if (/вернул|пришел|дома|уютн.*номер/.test(phrase)) return "return";
+  if (/спать|уснуть|ко сну|спокойн.*ноч/.test(phrase)) return "sleep";
+  if (/штор/.test(phrase) && /откр|раздвин/.test(phrase)) return "open";
+  if (/штор/.test(phrase) && /закр|задвин/.test(phrase)) return "close";
+  if (/кин[оо]|фильм/.test(phrase)) return "cinema";
+  if (/вечер/.test(phrase)) return "evening";
+  if (/утро/.test(phrase)) return "morning";
+  if (/ноч/.test(phrase)) return "night";
+  return null;
+}
 
 const SCENE_ASSET_REVISION = "2026-09-13-living-scene";
 const CURTAIN_PANEL_X = 2.63;
@@ -1795,6 +1822,9 @@ export function HotelExperience() {
   const [demoPlaying, setDemoPlaying] = useState(false);
   const [hasExplored, setHasExplored] = useState(false);
   const [mobileCurtainOpen, setMobileCurtainOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantMessage, setAssistantMessage] = useState<AssistantMessage | null>(null);
   const [isViewing, setIsViewing] = useState(false);
   const [showPanHint, setShowPanHint] = useState(true);
   const [mobileDpr, setMobileDpr] = useState(1.3);
@@ -1802,6 +1832,8 @@ export function HotelExperience() {
   const mobileViewAngles = useRef({ yaw: -0.12, pitch: 0 });
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const demoTimers = useRef<number[]>([]);
+  const assistantTimers = useRef<number[]>([]);
+  const assistantSheetRef = useRef<HTMLElement | null>(null);
   const steadyWindows = useRef(0);
   const experienceState = useRef<ExperienceState>({ mode: "evening", curtain: 84, parallax: true });
   const stopDemo = () => {
@@ -1809,26 +1841,109 @@ export function HotelExperience() {
     demoTimers.current = [];
     setDemoPlaying(false);
   };
+  const stopAssistantSequence = () => {
+    assistantTimers.current.forEach((timer) => window.clearTimeout(timer));
+    assistantTimers.current = [];
+  };
   const applyMode = (nextMode: SceneMode) => {
     setMode(nextMode);
     setCurtain(modeCurtainPresets[nextMode]);
   };
   const activateMode = (nextMode: SceneMode) => {
     stopDemo();
+    stopAssistantSequence();
     applyMode(nextMode);
     setHasExplored(true);
   };
   const changeRoom = (nextRoom: RoomView) => {
     stopDemo();
+    stopAssistantSequence();
     setRoom(nextRoom);
     setMobileCurtainOpen(false);
     mobileViewAngles.current = { yaw: 0, pitch: 0 };
     setHasExplored(true);
   };
-  const showAliceCurtainScenario = () => {
-    stopDemo();
-    setCurtain((current) => current > 50 ? 0 : 100);
+  const toggleAssistantPanel = () => {
+    setAssistantOpen((open) => !open);
+    setMobileCurtainOpen(false);
     setHasExplored(true);
+  };
+  const runAssistantIntent = (intent: AssistantIntent, prompt: string) => {
+    stopAssistantSequence();
+    stopDemo();
+    let response = "";
+    switch (intent) {
+      case "wake":
+        changeRoom("bedroom");
+        setMode("morning");
+        setCurtain(15);
+        assistantTimers.current = [
+          window.setTimeout(() => setCurtain(48), 650),
+          window.setTimeout(() => setCurtain(78), 1750),
+        ];
+        response = "Доброе утро. Открываю шторы постепенно и впускаю дневной свет.";
+        break;
+      case "view":
+        changeRoom("kitchen");
+        setMode("morning");
+        response = "Показываю панораму из кухни-гостиной при дневном свете.";
+        break;
+      case "return":
+        changeRoom("bedroom");
+        setMode("evening");
+        setCurtain(62);
+        response = "С возвращением. Включаю тёплый вечерний свет и немного прикрываю шторы.";
+        break;
+      case "sleep":
+        changeRoom("bedroom");
+        setMode("night");
+        setCurtain(0);
+        response = "Готовлю номер ко сну: шторы закрыты, освещение переходит в ночной режим.";
+        break;
+      case "open":
+        if (room === "kitchen") changeRoom("bedroom");
+        setCurtain(100);
+        response = room === "kitchen" ? "Возвращаюсь в номер и открываю шторы." : "Открываю шторы. Теперь видно долину.";
+        break;
+      case "close":
+        if (room === "kitchen") changeRoom("bedroom");
+        setCurtain(0);
+        response = "Закрываю шторы. В номере становится спокойнее.";
+        break;
+      case "evening":
+        applyMode("evening");
+        response = "Включаю вечерний сценарий: тёплый свет и мягкая атмосфера.";
+        break;
+      case "cinema":
+        if (room === "kitchen") changeRoom("bedroom");
+        applyMode("cinema");
+        response = "Включаю кино: свет приглушён, шторы закрыты.";
+        break;
+      case "night":
+        applyMode("night");
+        response = "Перехожу в ночной режим. Свет становится мягче.";
+        break;
+      case "morning":
+        applyMode("morning");
+        response = "Включаю утренний сценарий.";
+        break;
+    }
+    setAssistantMessage({ prompt, response });
+    setHasExplored(true);
+  };
+  const submitAssistantInput = () => {
+    const prompt = assistantInput.trim();
+    if (!prompt) return;
+    const intent = parseAssistantIntent(prompt);
+    if (intent) {
+      runAssistantIntent(intent, prompt);
+    } else {
+      setAssistantMessage({
+        prompt,
+        response: "Пока я понимаю только запросы о пробуждении, виде, возвращении, сне, шторах и времени суток. Попробуйте один из примеров выше.",
+      });
+    }
+    setAssistantInput("");
   };
   const adaptMobileResolution = useCallback((fps: number) => {
     if (fps < 24) {
@@ -1848,6 +1963,7 @@ export function HotelExperience() {
   }, []);
   const changeCurtain = (value: number) => {
     stopDemo();
+    stopAssistantSequence();
     setCurtain(value);
     setHasExplored(true);
   };
@@ -1858,6 +1974,7 @@ export function HotelExperience() {
       return;
     }
     stopDemo();
+    stopAssistantSequence();
     setDemoPlaying(true);
     applyMode("morning");
     demoTimers.current = [
@@ -1871,7 +1988,16 @@ export function HotelExperience() {
     ];
   };
 
-  useEffect(() => () => demoTimers.current.forEach((timer) => window.clearTimeout(timer)), []);
+  useEffect(() => () => {
+    demoTimers.current.forEach((timer) => window.clearTimeout(timer));
+    assistantTimers.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  useEffect(() => {
+    if (assistantOpen && assistantMessage) {
+      assistantSheetRef.current?.scrollTo({ top: assistantSheetRef.current.scrollHeight });
+    }
+  }, [assistantMessage, assistantOpen]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -2022,7 +2148,7 @@ export function HotelExperience() {
   }, []);
 
   return (
-    <main className={`hotel-experience mode-${mode} room-${room}${hasExplored ? " has-explored" : ""}${isViewing ? " is-viewing" : ""}`} id="experience">
+    <main className={`hotel-experience mode-${mode} room-${room}${hasExplored ? " has-explored" : ""}${isViewing ? " is-viewing" : ""}${assistantOpen ? " assistant-open" : ""}`} id="experience">
       <div
         className="scene-shell"
         aria-label="Интерактивное трёхмерное пространство номера"
@@ -2128,34 +2254,70 @@ export function HotelExperience() {
         <p className="curtain-note">Положение штор меняет свет в номере.</p>
       </aside> : null}
 
-      {room === "bedroom" ? <aside className="assistant-panel glass-panel">
+      <aside className="assistant-panel glass-panel">
         <div className="assistant-heading">
           <span className="assistant-orb">
             <img src="/brand/alice-logo.svg" alt="" />
           </span>
           <span>
-            <strong>Алиса</strong>
-            <small>Пример голосового сценария</small>
+            <strong>Алиса · демо</strong>
+            <small>Сценарии по запросу</small>
           </span>
         </div>
         <blockquote>
-          {curtain > 50 ? "«Алиса, закрой шторы»" : "«Алиса, открой шторы»"}
+          {assistantMessage ? `«${assistantMessage.prompt}»` : "«Разбуди меня мягко»"}
         </blockquote>
-        <div className="voice-wave" aria-hidden="true">
-          {Array.from({ length: 18 }).map((_, index) => (
-            <i key={index} style={{ animationDelay: `${index * -55}ms` }} />
-          ))}
-        </div>
         <button
           type="button"
-          className="voice-button"
-          aria-label="Показать сценарий Алисы со шторами"
-          onClick={showAliceCurtainScenario}
+          className="assistant-open-button"
+          aria-label="Открыть команды Алисы — демонстрационный концепт"
+          aria-expanded={assistantOpen}
+          onClick={toggleAssistantPanel}
         >
-          <Play aria-hidden="true" />
+          Задать запрос <ChevronRight aria-hidden="true" />
         </button>
-        <small className="listening-label">Демонстрация, без подключения к Яндексу</small>
-      </aside> : null}
+        <small className="listening-label">Без подключения к устройствам</small>
+      </aside>
+
+      {assistantOpen ? <section ref={assistantSheetRef} className="assistant-demo-sheet glass-panel" aria-label="Демонстрация сценариев по запросу">
+        <div className="assistant-demo-heading">
+          <span className="assistant-orb"><img src="/brand/alice-logo.svg" alt="" /></span>
+          <span><strong>Алиса · демо</strong><small>Запросы гостя</small></span>
+          <button type="button" className="assistant-demo-close" aria-label="Закрыть панель запросов" onClick={toggleAssistantPanel}><X aria-hidden="true" /></button>
+        </div>
+        <p className="assistant-demo-intro">Один запрос меняет сразу несколько деталей номера. Попробуйте пример или напишите свой.</p>
+        <div className="assistant-demo-commands">
+          {assistantSuggestions.map((item) => <button
+            key={item.intent}
+            type="button"
+            onClick={() => runAssistantIntent(item.intent, item.prompt)}
+          >
+            <span>«{item.prompt}»</span><ChevronRight aria-hidden="true" />
+          </button>)}
+        </div>
+        <form className="assistant-demo-form" onSubmit={(event) => { event.preventDefault(); submitAssistantInput(); }}>
+          <label htmlFor="assistant-request">Ваш запрос</label>
+          <div>
+            <input
+              id="assistant-request"
+              type="text"
+              value={assistantInput}
+              onChange={(event) => setAssistantInput(event.target.value)}
+              placeholder="Например, закрой шторы"
+              maxLength={100}
+              autoComplete="off"
+            />
+            <button type="submit" aria-label="Отправить запрос" disabled={!assistantInput.trim()}><ArrowRight aria-hidden="true" /></button>
+          </div>
+        </form>
+        {assistantMessage ? <div className="assistant-demo-conversation" aria-live="polite">
+          <span>Ваш запрос</span><p>«{assistantMessage.prompt}»</p>
+          <span>Что изменилось</span><p>{assistantMessage.response}</p>
+        </div> : null}
+        <small className="assistant-demo-disclaimer">
+          Это интерактивный концепт, не подключённый к Алисе и реальным устройствам.
+        </small>
+      </section> : null}
 
       <aside className="scenario-panel glass-panel" id="scenarios">
         <div className="panel-title">
@@ -2199,8 +2361,8 @@ export function HotelExperience() {
             />
           </div>
         )}
-        {room === "bedroom" ? <div className="mobile-actions glass-panel">
-          <button
+        <div className="mobile-actions glass-panel">
+          {room === "bedroom" ? <button
             type="button"
             className="mobile-curtain-toggle"
             aria-expanded={mobileCurtainOpen}
@@ -2212,17 +2374,18 @@ export function HotelExperience() {
             <SlidersHorizontal aria-hidden="true" />
             <span>Шторы</span>
             <strong>{curtain}%</strong>
-          </button>
+          </button> : null}
           <button
             type="button"
             className="mobile-alice-trigger"
-            aria-label="Показать демонстрационную команду Алисы для штор"
-            onClick={showAliceCurtainScenario}
+            aria-label="Открыть демонстрацию сценариев по запросу"
+            aria-expanded={assistantOpen}
+            onClick={toggleAssistantPanel}
           >
             <img src="/brand/alice-logo.svg" alt="" />
             <span>Алиса · демо</span>
           </button>
-        </div> : null}
+        </div>
         <nav className="mobile-scenarios" aria-label="Сценарии освещения и обзор номера">
           {sceneModes.map((item) => (
             <button
@@ -2251,6 +2414,9 @@ export function HotelExperience() {
             className="mobile-look-trigger"
             aria-label="Осмотреть номер без панелей"
             onClick={() => {
+              if (assistantOpen) {
+                setAssistantOpen(false);
+              }
               setIsViewing(true);
               setHasExplored(true);
             }}
