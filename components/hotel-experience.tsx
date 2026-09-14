@@ -5,6 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   ArrowRight,
   ChevronRight,
+  CookingPot,
   Maximize2,
   Minimize2,
   Moon,
@@ -49,6 +50,7 @@ import {
   RepeatWrapping,
   RGBAFormat,
   SRGBColorSpace,
+  Shape,
   ShaderMaterial,
   Vector2,
   Vector3,
@@ -63,6 +65,7 @@ import { Slider } from "@/components/ui/slider";
 
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
+type RoomView = "bedroom" | "kitchen";
 
 const SCENE_ASSET_REVISION = "2026-09-13-living-scene";
 const CURTAIN_PANEL_X = 2.63;
@@ -100,6 +103,11 @@ const WEB_CAMERA = {
   position: [7.35, 1.72, -3.75] as [number, number, number],
   target: [2.55, 1.72, -6] as [number, number, number],
   verticalFov: 48.897158,
+};
+
+const KITCHEN_CAMERA = {
+  position: new Vector3(5.5, 1.75, -14),
+  target: new Vector3(4.3, 1.7, -20),
 };
 
 const sceneModes: Array<{
@@ -497,10 +505,12 @@ const landscapeFragmentShader = `
 function ExteriorEnvironment({
   curtain,
   mode,
+  room,
   tier,
 }: {
   curtain: number;
   mode: SceneMode;
+  room: RoomView;
   tier: AssetTier;
 }) {
   const profile = modeProfile[mode];
@@ -577,7 +587,7 @@ function ExteriorEnvironment({
     animatedWeights.current.lerp(targetWeights, 1 - Math.exp(-delta * 1.35));
     animatedTint.current.lerp(targetTint, 1 - Math.exp(-delta * 1.35));
     parallaxTarget.set(
-      (camera.position.z - WEB_CAMERA.position[2]) * 0.013,
+      (camera.position.z - (room === "kitchen" ? KITCHEN_CAMERA.position.z : WEB_CAMERA.position[2])) * 0.013,
       (camera.position.y - WEB_CAMERA.position[1]) * -0.01,
     );
     animatedParallax.current.lerp(parallaxTarget, 1 - Math.exp(-delta * 2.2));
@@ -602,8 +612,8 @@ function ExteriorEnvironment({
     <group>
       <mesh
         material={landscapeMaterial}
-        position={[-8, 1.72, -10.95]}
-        rotation={[0, Math.PI / 2, 0]}
+        position={room === "kitchen" ? [2.3, 1.72, -22.45] : [-8, 1.72, -10.95]}
+        rotation={[0, room === "kitchen" ? 0.81 : Math.PI / 2, 0]}
       >
         <planeGeometry args={[22, 8.5]} />
       </mesh>
@@ -1183,7 +1193,7 @@ function NightStars({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   return <points geometry={geometry} material={material} />;
 }
 
-function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
+function Apartment({ mode, room, tier }: { mode: SceneMode; room: RoomView; tier: AssetTier }) {
   const { gl } = useThree();
   const profile = modeProfile[mode];
   const floorSuffix = tier === "premium" ? "2048" : "1024";
@@ -1215,7 +1225,9 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
   const url =
     tier === "premium"
       ? `/models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`
-      : `/models/AAELS-mobile-balanced.glb?rev=${SCENE_ASSET_REVISION}`;
+      : room === "kitchen"
+        ? `/models/AAELS-mobile-kitchen.glb?rev=${SCENE_ASSET_REVISION}`
+        : `/models/AAELS-mobile-balanced.glb?rev=${SCENE_ASSET_REVISION}`;
   const gltf = useGLTF(url);
   const model = useMemo(() => gltf.scene.clone(true) as Group, [gltf.scene]);
   const floorGeometry = useMemo(() => {
@@ -1381,11 +1393,13 @@ function Apartment({ mode, tier }: { mode: SceneMode; tier: AssetTier }) {
 function CinematicCamera({
   mode,
   parallax,
+  room,
   tier,
   viewAngles,
 }: {
   mode: SceneMode;
   parallax: boolean;
+  room: RoomView;
   tier: AssetTier;
   viewAngles: { current: { yaw: number; pitch: number } };
 }) {
@@ -1407,13 +1421,14 @@ function CinematicCamera({
   }, [camera, size.height, size.width, tier]);
 
   useLayoutEffect(() => {
-    camera.position.copy(sceneShots.evening.position);
-    lookTarget.current.copy(sceneShots.evening.target);
+    const shot = room === "kitchen" ? KITCHEN_CAMERA : sceneShots.evening;
+    camera.position.copy(shot.position);
+    lookTarget.current.copy(shot.target);
     camera.lookAt(lookTarget.current);
-  }, [camera]);
+  }, [camera, room]);
 
   useFrame((_, delta) => {
-    const shot = sceneShots[mode];
+    const shot = room === "kitchen" ? KITCHEN_CAMERA : sceneShots[mode];
     if (tier === "mobile") {
       const { yaw, pitch } = viewAngles.current;
       direction.subVectors(shot.target, shot.position);
@@ -1440,6 +1455,58 @@ function CinematicCamera({
   });
 
   return null;
+}
+
+function KitchenLightRig({ mode }: { mode: SceneMode }) {
+  const profile = modeProfile[mode];
+  const portal = useRef<RectAreaLight>(null);
+
+  useLayoutEffect(() => {
+    portal.current?.lookAt(5.25, 1.5, -17.1);
+  }, []);
+
+  return (
+    <>
+      <hemisphereLight args={["#d8e3ed", "#36251b", mode === "night" ? 0.22 : 0.52]} />
+      <directionalLight
+        color={mode === "evening" ? "#ffc38d" : mode === "night" ? "#9dbce4" : "#fff2df"}
+        intensity={profile.key * (mode === "night" ? 0.2 : 0.75)}
+        position={[0.5, 6.5, -24]}
+      />
+      <rectAreaLight
+        ref={portal}
+        color={mode === "evening" ? "#ffcf9a" : "#e5f0ff"}
+        intensity={mode === "night" ? 0.4 : mode === "cinema" ? 0.75 : 1.8}
+        width={3.4}
+        height={2.5}
+        position={[2.5, 1.75, -21.7]}
+      />
+      <pointLight
+        color="#ffdebb"
+        intensity={mode === "night" ? 1.2 : mode === "cinema" ? 0.4 : 0.45}
+        distance={7}
+        decay={2}
+        position={[6.3, 2.4, -16.8]}
+      />
+    </>
+  );
+}
+
+function KitchenCeiling() {
+  const shape = useMemo(() => new Shape()
+    .moveTo(2.1, 10.2)
+    .lineTo(8.9, 10.2)
+    .lineTo(8.9, 22.7)
+    .lineTo(4.5, 22.7)
+    .lineTo(2.1, 18.5)
+    .closePath(), []);
+
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2.91, 0]}>
+      <shapeGeometry args={[shape]} />
+      <meshStandardMaterial color="#b7a495" roughness={0.94} side={DoubleSide} />
+    </mesh>
+  );
 }
 
 function ExteriorLightRig({
@@ -1599,6 +1666,7 @@ function Scene({
   economy,
   mode,
   parallax,
+  room,
   tier,
   viewAngles,
 }: {
@@ -1606,21 +1674,27 @@ function Scene({
   economy: boolean;
   mode: SceneMode;
   parallax: boolean;
+  room: RoomView;
   tier: AssetTier;
   viewAngles: { current: { yaw: number; pitch: number } };
 }) {
   return (
     <>
       <SceneBackdrop mode={mode} />
-      <SceneEnvironment curtain={curtain} mode={mode} />
-      <ExteriorLightRig curtain={curtain} economy={economy} mode={mode} tier={tier} />
-      <ExteriorEnvironment curtain={curtain} mode={mode} tier={tier} />
-      <Apartment mode={mode} tier={tier} />
-      <CurtainSystem curtain={curtain} mode={mode} tier={tier} />
-      <SunGlare curtain={curtain} mode={mode} tier={tier} />
-      <DustMotes curtain={curtain} mode={mode} tier={tier} />
-      <NightStars mode={mode} tier={tier} />
-      <CinematicCamera mode={mode} parallax={parallax} tier={tier} viewAngles={viewAngles} />
+      <SceneEnvironment curtain={room === "kitchen" ? 100 : curtain} mode={mode} />
+      {room === "kitchen"
+        ? <KitchenLightRig mode={mode} />
+        : <ExteriorLightRig curtain={curtain} economy={economy} mode={mode} tier={tier} />}
+      <ExteriorEnvironment curtain={room === "kitchen" ? 100 : curtain} mode={mode} room={room} tier={tier} />
+      <Apartment mode={mode} room={room} tier={tier} />
+      {room === "kitchen" ? <KitchenCeiling /> : null}
+      {room === "bedroom" ? <>
+        <CurtainSystem curtain={curtain} mode={mode} tier={tier} />
+        <SunGlare curtain={curtain} mode={mode} tier={tier} />
+        <DustMotes curtain={curtain} mode={mode} tier={tier} />
+        <NightStars mode={mode} tier={tier} />
+      </> : null}
+      <CinematicCamera mode={mode} parallax={parallax} room={room} tier={tier} viewAngles={viewAngles} />
       {tier === "premium" ? <BloomPipeline mode={mode} /> : null}
     </>
   );
@@ -1714,6 +1788,7 @@ function chooseTier(): AssetTier {
 
 export function HotelExperience() {
   const [mode, setMode] = useState<SceneMode>("evening");
+  const [room, setRoom] = useState<RoomView>("bedroom");
   const [tier, setTier] = useState<AssetTier | null>(null);
   const [curtain, setCurtain] = useState(84);
   const [parallax, setParallax] = useState(true);
@@ -1722,7 +1797,7 @@ export function HotelExperience() {
   const [mobileCurtainOpen, setMobileCurtainOpen] = useState(false);
   const [isViewing, setIsViewing] = useState(false);
   const [showPanHint, setShowPanHint] = useState(true);
-  const [mobileDpr, setMobileDpr] = useState(0.95);
+  const [mobileDpr, setMobileDpr] = useState(1.3);
   const [economyMode, setEconomyMode] = useState(false);
   const mobileViewAngles = useRef({ yaw: -0.12, pitch: 0 });
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -1743,26 +1818,33 @@ export function HotelExperience() {
     applyMode(nextMode);
     setHasExplored(true);
   };
+  const changeRoom = (nextRoom: RoomView) => {
+    stopDemo();
+    setRoom(nextRoom);
+    setMobileCurtainOpen(false);
+    mobileViewAngles.current = { yaw: 0, pitch: 0 };
+    setHasExplored(true);
+  };
   const showAliceCurtainScenario = () => {
     stopDemo();
     setCurtain((current) => current > 50 ? 0 : 100);
     setHasExplored(true);
   };
   const adaptMobileResolution = useCallback((fps: number) => {
-    if (fps < 27) {
+    if (fps < 24) {
       steadyWindows.current = 0;
       setEconomyMode(true);
-      setMobileDpr((current) => Math.max(0.82, Math.round((current - 0.07) * 100) / 100));
+      setMobileDpr((current) => Math.max(1.05, Math.round((current - 0.05) * 100) / 100));
       return;
     }
-    if (fps < 30) {
+    if (fps < 29) {
       steadyWindows.current = 0;
       return;
     }
     steadyWindows.current += 1;
     if (steadyWindows.current < 3) return;
     steadyWindows.current = 0;
-    setMobileDpr((current) => Math.min(1.06, Math.round((current + 0.04) * 100) / 100));
+    setMobileDpr((current) => Math.min(1.4, Math.round((current + 0.03) * 100) / 100));
   }, []);
   const changeCurtain = (value: number) => {
     stopDemo();
@@ -1814,9 +1896,9 @@ export function HotelExperience() {
     start.x = event.clientX;
     start.y = event.clientY;
     mobileViewAngles.current.yaw = MathUtils.clamp(
-      mobileViewAngles.current.yaw + (dx / Math.max(window.innerWidth, 320)) * 0.85,
-      -0.6,
-      0.22,
+      mobileViewAngles.current.yaw + (dx / Math.max(window.innerWidth, 320)) * 0.68,
+      room === "kitchen" ? -0.18 : -0.26,
+      room === "kitchen" ? 0.18 : 0.16,
     );
     mobileViewAngles.current.pitch = MathUtils.clamp(
       mobileViewAngles.current.pitch + (dy / Math.max(window.innerHeight, 320)) * 0.45,
@@ -1940,7 +2022,7 @@ export function HotelExperience() {
   }, []);
 
   return (
-    <main className={`hotel-experience mode-${mode}${hasExplored ? " has-explored" : ""}${isViewing ? " is-viewing" : ""}`} id="experience">
+    <main className={`hotel-experience mode-${mode} room-${room}${hasExplored ? " has-explored" : ""}${isViewing ? " is-viewing" : ""}`} id="experience">
       <div
         className="scene-shell"
         aria-label="Интерактивное трёхмерное пространство номера"
@@ -1959,7 +2041,7 @@ export function HotelExperience() {
             }}
             dpr={tier === "mobile" ? mobileDpr : [1, 1.55]}
             frameloop={tier === "mobile" ? "demand" : "always"}
-            gl={{ antialias: tier === "premium", powerPreference: "high-performance" }}
+            gl={{ antialias: true, powerPreference: "high-performance" }}
             performance={{ min: 0.55 }}
             shadows={tier === "premium"}
             onCreated={({ gl }) => {
@@ -1974,6 +2056,7 @@ export function HotelExperience() {
                 economy={tier === "mobile" && economyMode}
                 mode={mode}
                 parallax={parallax}
+                room={room}
                 tier={tier}
                 viewAngles={mobileViewAngles}
               />
@@ -1984,7 +2067,7 @@ export function HotelExperience() {
       </div>
 
       <div className="cinematic-grade" aria-hidden="true" />
-      <CameraFlare curtain={curtain} mode={mode} />
+      {room === "bedroom" ? <CameraFlare curtain={curtain} mode={mode} /> : null}
       <LoadStatus />
 
       <header className="experience-header">
@@ -1993,6 +2076,9 @@ export function HotelExperience() {
           <span className="brand-name">БЕЛКУР <small>концепт</small></span>
         </a>
         <div className="header-actions">
+          <button type="button" className="room-switch-desktop" onClick={() => changeRoom(room === "bedroom" ? "kitchen" : "bedroom")}>
+            <CookingPot aria-hidden="true" /> {room === "bedroom" ? "Кухня-гостиная" : "Вернуться в номер"}
+          </button>
           <button type="button" className="demo-button" onClick={toggleDemo}>
             {demoPlaying ? "Остановить показ" : "Показать демо"} <ArrowRight aria-hidden="true" />
           </button>
@@ -2007,12 +2093,12 @@ export function HotelExperience() {
           в вашем ритме
         </h1>
         <p className="hero-description">
-          <span className="desktop-description">Откройте шторы, выберите время суток и почувствуйте, как меняется атмосфера номера.</span>
-          <span className="mobile-description">Откройте шторы. Выберите время суток.</span>
+          <span className="desktop-description">{room === "bedroom" ? "Откройте шторы, выберите время суток и почувствуйте, как меняется атмосфера номера." : "Загляните в кухню-гостиную: панорамный вид тоже становится частью пространства."}</span>
+          <span className="mobile-description">{room === "bedroom" ? "Откройте шторы. Выберите время суток." : "Кухня-гостиная и вид на долину."}</span>
         </p>
       </section>
 
-      <aside className="room-panel glass-panel" id="technology" aria-label="Управление шторами">
+      {room === "bedroom" ? <aside className="room-panel glass-panel" id="technology" aria-label="Управление шторами">
         <div className="panel-title">
           <span>Управление</span>
           <small>3D-сцена</small>
@@ -2040,9 +2126,9 @@ export function HotelExperience() {
           />
         </div>
         <p className="curtain-note">Положение штор меняет свет в номере.</p>
-      </aside>
+      </aside> : null}
 
-      <aside className="assistant-panel glass-panel">
+      {room === "bedroom" ? <aside className="assistant-panel glass-panel">
         <div className="assistant-heading">
           <span className="assistant-orb">
             <img src="/brand/alice-logo.svg" alt="" />
@@ -2069,7 +2155,7 @@ export function HotelExperience() {
           <Play aria-hidden="true" />
         </button>
         <small className="listening-label">Демонстрация, без подключения к Яндексу</small>
-      </aside>
+      </aside> : null}
 
       <aside className="scenario-panel glass-panel" id="scenarios">
         <div className="panel-title">
@@ -2097,7 +2183,7 @@ export function HotelExperience() {
       </aside>
 
       <div className="mobile-controls">
-        {mobileCurtainOpen && (
+        {room === "bedroom" && mobileCurtainOpen && (
           <div className="mobile-curtain-panel glass-panel">
             <div className="curtain-heading">
               <span>Шторы</span>
@@ -2113,7 +2199,7 @@ export function HotelExperience() {
             />
           </div>
         )}
-        <div className="mobile-actions glass-panel">
+        {room === "bedroom" ? <div className="mobile-actions glass-panel">
           <button
             type="button"
             className="mobile-curtain-toggle"
@@ -2136,7 +2222,7 @@ export function HotelExperience() {
             <img src="/brand/alice-logo.svg" alt="" />
             <span>Алиса · демо</span>
           </button>
-        </div>
+        </div> : null}
         <nav className="mobile-scenarios" aria-label="Сценарии освещения и обзор номера">
           {sceneModes.map((item) => (
             <button
@@ -2151,6 +2237,15 @@ export function HotelExperience() {
               <span>{item.label}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="mobile-room-trigger"
+            aria-label={room === "bedroom" ? "Показать кухню-гостиную" : "Вернуться в номер"}
+            onClick={() => changeRoom(room === "bedroom" ? "kitchen" : "bedroom")}
+          >
+            <CookingPot aria-hidden="true" />
+            <span>{room === "bedroom" ? "Кухня" : "Номер"}</span>
+          </button>
           <button
             type="button"
             className="mobile-look-trigger"
