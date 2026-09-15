@@ -484,10 +484,63 @@ const landscapeVertexShader = `
   }
 `;
 
+function createMistTexture() {
+  const width = 128;
+  const height = 64;
+  const data = new Uint8Array(width * height * 4);
+  const hash = (x: number, y: number) => {
+    let value = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+    value = Math.imul(value ^ (value >>> 13), 1274126177);
+    return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+  };
+  const noise = (u: number, v: number, columns: number, rows: number) => {
+    const x = u * columns;
+    const y = v * rows;
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = (x - ix) ** 2 * (3 - 2 * (x - ix));
+    const fy = (y - iy) ** 2 * (3 - 2 * (y - iy));
+    const left = ix % columns;
+    const right = (ix + 1) % columns;
+    const bottom = iy % rows;
+    const top = (iy + 1) % rows;
+    const lower = MathUtils.lerp(hash(left, bottom), hash(right, bottom), fx);
+    const upper = MathUtils.lerp(hash(left, top), hash(right, top), fx);
+    return MathUtils.lerp(lower, upper, fy);
+  };
+
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const u = column / width;
+      const v = row / height;
+      const value = Math.round((
+        noise(u, v, 4, 3) * 0.57 +
+        noise(u, v, 9, 6) * 0.31 +
+        noise(u, v, 18, 12) * 0.12
+      ) * 255);
+      const offset = (row * width + column) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+
+  const texture = new DataTexture(data, width, height, RGBAFormat);
+  texture.magFilter = LinearFilter;
+  texture.minFilter = LinearFilter;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 const landscapeFragmentShader = `
   varying vec2 vUv;
   uniform sampler2D uLandscape;
+  uniform sampler2D uMist;
   uniform sampler2D uSkyline;
+  uniform float uMistDetail;
   uniform vec3 uWeights;
   uniform vec3 uTint;
   uniform vec2 uParallax;
@@ -523,6 +576,24 @@ const landscapeFragmentShader = `
       sin(sampleUv.y * 4.8 + sampleUv.x * 2.1 - uTime * 0.025);
     float cloudShadow = smoothstep(-0.1, 0.82, cloudField);
     landscape *= 1.0 - (uWeights.x + uWeights.y) * (1.0 - skyMask) * cloudShadow * 0.13;
+
+    // Only the light veil in the distant valleys moves; the photographic
+    // mountain contours, trees and buildings stay fixed in the source image.
+    float valleyCenter = 0.435 + 0.045 * sin(sampleUv.x * 7.0 - 0.5);
+    float valleyBand = 1.0 - smoothstep(0.018, 0.078, abs(sampleUv.y - valleyCenter));
+    float valleyReach = smoothstep(0.38, 0.49, sampleUv.x) *
+      (1.0 - smoothstep(0.79, 0.96, sampleUv.x));
+    float mistA = texture2D(uMist, vec2(sampleUv.x * 1.35 + uTime * 0.005, sampleUv.y * 2.4)).r;
+    float mistB = 0.5;
+    if (uMistDetail > 0.5) {
+      mistB = texture2D(uMist, vec2(sampleUv.x * 2.1 - uTime * 0.0025, sampleUv.y * 3.2 + 0.37)).r;
+    }
+    float mistShape = smoothstep(0.34, 0.69, mistA * 0.72 + mistB * 0.28);
+    float mistAmount = valleyBand * valleyReach * mistShape *
+      (uWeights.x * 0.25 + uWeights.y * 0.29 + uWeights.z * 0.055);
+    vec3 mistColor = uWeights.x * vec3(0.66, 0.72, 0.76) +
+      uWeights.y * vec3(0.8, 0.7, 0.61) + uWeights.z * vec3(0.18, 0.23, 0.3);
+    landscape = mix(landscape, mistColor, mistAmount);
     gl_FragColor = vec4(landscape * uTint * uBrightness, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -574,6 +645,7 @@ function ExteriorEnvironment({
     texture.needsUpdate = true;
     return texture;
   }, []);
+  const mistTexture = useMemo(createMistTexture, []);
   const targetWeights = useMemo(
     () => new Vector3(...profile.landscapeMix),
     [profile.landscapeMix],
@@ -584,6 +656,7 @@ function ExteriorEnvironment({
   const animatedParallax = useRef(new Vector2());
   const parallaxTarget = useMemo(() => new Vector2(), []);
   const animatedOpen = useRef(getWindowLight(curtain).open);
+  const motionAllowed = useRef(true);
   const landscapeMaterial = useMemo(
     () => new ShaderMaterial({
       depthWrite: true,
@@ -592,6 +665,8 @@ function ExteriorEnvironment({
       uniforms: {
         uBrightness: { value: 1 },
         uLandscape: { value: landscapeTexture },
+        uMist: { value: mistTexture },
+        uMistDetail: { value: tier === "premium" ? 1 : 0 },
         uSkyline: { value: skylineTexture },
         uParallax: { value: new Vector2() },
         uTint: { value: animatedTint.current.clone() },
@@ -600,8 +675,16 @@ function ExteriorEnvironment({
       },
       vertexShader: landscapeVertexShader,
     }),
-    [landscapeTexture, skylineTexture],
+    [landscapeTexture, mistTexture, skylineTexture],
   );
+
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => { motionAllowed.current = !preference.matches; };
+    update();
+    preference.addEventListener("change", update);
+    return () => preference.removeEventListener("change", update);
+  }, []);
 
   // The landscape material is intentionally animated by the render loop.
   useFrame(({ camera, clock }, delta) => {
@@ -623,16 +706,18 @@ function ExteriorEnvironment({
     landscapeMaterial.uniforms.uParallax.value.copy(animatedParallax.current);
     landscapeMaterial.uniforms.uTint.value.copy(animatedTint.current);
     landscapeMaterial.uniforms.uWeights.value.copy(animatedWeights.current);
-    landscapeMaterial.uniforms.uTime.value = clock.elapsedTime;
+    landscapeMaterial.uniforms.uMistDetail.value = tier === "premium" ? 1 : 0;
+    if (motionAllowed.current) landscapeMaterial.uniforms.uTime.value = clock.elapsedTime;
   });
 
   useEffect(
     () => () => {
       landscapeTexture.dispose();
+      mistTexture.dispose();
       skylineTexture.dispose();
       landscapeMaterial.dispose();
     },
-    [landscapeMaterial, landscapeTexture, skylineTexture],
+    [landscapeMaterial, landscapeTexture, mistTexture, skylineTexture],
   );
 
   return (
