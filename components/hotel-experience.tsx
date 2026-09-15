@@ -61,7 +61,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { Slider } from "@/components/ui/slider";
+import { Slider } from "@/components/slider";
 
 type SceneMode = "morning" | "evening" | "cinema" | "night";
 type AssetTier = "premium" | "mobile";
@@ -95,6 +95,7 @@ function parseAssistantIntent(input: string): AssistantIntent | null {
 }
 
 const SCENE_ASSET_REVISION = "2026-09-13-living-scene";
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 const CURTAIN_PANEL_X = 2.63;
 const CURTAIN_RAIL_X = 2.66;
 
@@ -614,7 +615,7 @@ function ExteriorEnvironment({
   const profile = modeProfile[mode];
   const suffix = tier === "premium" ? "2048" : "1280";
   const texturePath = useMemo(
-    () => `/environments/belokurikha-valley-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`,
+    () => assetPath(`environments/belokurikha-valley-${suffix}.webp?rev=${SCENE_ASSET_REVISION}`),
     [suffix],
   );
   const sourceTexture = useTexture(texturePath);
@@ -1310,7 +1311,7 @@ function Apartment({ mode, room, tier }: { mode: SceneMode; room: RoomView; tier
   const profile = modeProfile[mode];
   const floorSuffix = tier === "premium" ? "2048" : "1024";
   const floorSource = useTexture(
-    `/materials/smoked-oak-floor-${floorSuffix}.webp?rev=${SCENE_ASSET_REVISION}`,
+    assetPath(`materials/smoked-oak-floor-${floorSuffix}.webp?rev=${SCENE_ASSET_REVISION}`),
   );
   const floorTexture = useMemo(
     () => {
@@ -1336,10 +1337,10 @@ function Apartment({ mode, room, tier }: { mode: SceneMode; room: RoomView; tier
   const targetWarmth = useMemo(() => new Color(profile.warmth), [profile.warmth]);
   const url =
     tier === "premium"
-      ? `/models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`
+      ? assetPath(`models/AAELS-premium-web.glb?rev=${SCENE_ASSET_REVISION}`)
       : room === "kitchen"
-        ? `/models/AAELS-mobile-kitchen.glb?rev=${SCENE_ASSET_REVISION}`
-        : `/models/AAELS-mobile-balanced.glb?rev=${SCENE_ASSET_REVISION}`;
+        ? assetPath(`models/AAELS-mobile-kitchen.glb?rev=${SCENE_ASSET_REVISION}`)
+        : assetPath(`models/AAELS-mobile-balanced.glb?rev=${SCENE_ASSET_REVISION}`);
   const gltf = useGLTF(url);
   const model = useMemo(() => gltf.scene.clone(true) as Group, [gltf.scene]);
   const floorGeometry = useMemo(() => {
@@ -2342,7 +2343,7 @@ export function HotelExperience() {
       <aside className="assistant-panel glass-panel">
         <div className="assistant-heading">
           <span className="assistant-orb">
-            <img src="/brand/alice-logo.svg" alt="" />
+            <img src={assetPath("brand/alice-logo.svg")} alt="" />
           </span>
           <span>
             <strong>Алиса · демо</strong>
@@ -2366,7 +2367,7 @@ export function HotelExperience() {
 
       {assistantOpen ? <section ref={assistantSheetRef} className="assistant-demo-sheet glass-panel" aria-label="Демонстрация сценариев по запросу">
         <div className="assistant-demo-heading">
-          <span className="assistant-orb"><img src="/brand/alice-logo.svg" alt="" /></span>
+          <span className="assistant-orb"><img src={assetPath("brand/alice-logo.svg")} alt="" /></span>
           <span><strong>Алиса · демо</strong><small>Запросы гостя</small></span>
           <button type="button" className="assistant-demo-close" aria-label="Закрыть панель запросов" onClick={toggleAssistantPanel}><X aria-hidden="true" /></button>
         </div>
@@ -2467,7 +2468,7 @@ export function HotelExperience() {
             aria-expanded={assistantOpen}
             onClick={toggleAssistantPanel}
           >
-            <img src="/brand/alice-logo.svg" alt="" />
+            <img src={assetPath("brand/alice-logo.svg")} alt="" />
             <span>Алиса · демо</span>
           </button>
         </div>
